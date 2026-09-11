@@ -95,3 +95,31 @@ breaking changes bump the minor).
     branches, exercised only when the test environment can create symlinks —
     covered on CI, conditionally skipped locally without elevated
     permissions).
+- **Phase B2 — chunking.**
+  - `chunking/base.py`: the `Chunker` protocol (`chunk(document) -> list[Chunk]`)
+    plus the splitting engine shared by all three chunkers — `validate_budget`
+    (`ChunkingError` if `overlap_tokens` isn't strictly less than
+    `target_tokens`), `make_chunk`, `extend_to_token_limit` (binary-searches
+    the character offset fitting a token budget, for any `TokenCounter`,
+    without assuming a fixed chars-per-token ratio), `atomic_spans` (the
+    separator-hierarchy recursive splitter, falling back to character-level
+    bisection once separators are exhausted), and `pack_spans` (greedily
+    merges atomic spans into windows with proportional overlap).
+  - `chunking/fixed.py`: `FixedChunker` — fixed-size character/token windows
+    with no structural awareness, for when speed matters more than splitting
+    on natural boundaries.
+  - `chunking/recursive.py`: `RecursiveChunker` — the default (plan.md §7).
+    Splits on a paragraph/line/sentence/word separator hierarchy, packed to
+    a token budget.
+  - `chunking/markdown.py`: `MarkdownChunker` — splits along ATX headings
+    first (a chunk never straddles a heading boundary), then applies the
+    same separator-hierarchy packing within each section. Every chunk
+    carries the reserved `nanorag.heading_path` metadata key.
+  - Every chunk is built so `document.text[start_char:end_char] ==
+    chunk.text` and the union of every chunk's span covers the whole
+    document with no gaps, regardless of overlap — verified by a Hypothesis
+    property test across 500 generated `(text, target_tokens,
+    overlap_tokens)` inputs run against all three chunkers (plan.md §9 B2
+    checkpoint).
+  - 238 tests, 100% coverage on the new `chunking/` package (99% on `src/`
+    overall — the same pre-existing symlink-branch gap from B1).

@@ -8,7 +8,7 @@ contiguous release list.
 | Phase | Version | Goal | Status |
 | --- | --- | --- | --- |
 | **A — Foundation** | `v0.0.1` | Repo installs, lints, type-checks, tests, builds a wheel on Linux + Windows. Core data types. | **done; Gate A passed** |
-| **B — Corpus to index** | `v0.0.4` | Real files → durable, searchable vectors. Fully offline. | **B1 done; B2 next** |
+| **B — Corpus to index** | `v0.0.4` | Real files → durable, searchable vectors. Fully offline. | **B1–B2 done; B3 next** |
 | **C — First answers (MVP)** | `v0.1.0` | Documents in, cited answer out — free key or fully offline. First public release. | not started |
 | **D — Trust** | `v0.3.0` | Citations resolving to text spans, a CLI, quality as numbers in CI (≥ 200-item eval set). | not started |
 | **E — Durability** | `v0.4.0` | Re-ingesting a changed corpus is correct and cheap. | not started |
@@ -37,8 +37,13 @@ contiguous release list.
   always skipped, never followed. Gitignore-style glob matching
   (`loaders/globbing.py`) — `*` stays within a path segment, `**` crosses
   segments.
-- **B2** — chunking (`base`, `fixed`, `recursive`, `markdown`) — *next.*
-- **B3** — `store/sqlite_docs.py` + `store/numpy_store.py`.
+- **B2** ✅ — `chunking/` (`base`, `fixed`, `recursive` default, `markdown`).
+  Every chunk's offsets reconstruct the source text and the union of chunk
+  spans covers the document with no gaps, regardless of overlap — a
+  Hypothesis property test verifies this across 500 generated inputs on all
+  three chunkers. Markdown chunks carry a `nanorag.heading_path` and never
+  straddle a heading boundary.
+- **B3** — `store/sqlite_docs.py` + `store/numpy_store.py` — *next.*
 - **B4** — `embeddings/` (local ONNX via fastembed, cache, batching).
 - **🚦 Gate B** — storage schema and offline ingest path reviewed before
   anything reads from them.
