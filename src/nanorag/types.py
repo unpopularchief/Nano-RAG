@@ -18,14 +18,12 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 from types import MappingProxyType
 from typing import Any
 
 #: The only value types permitted in a metadata mapping.
 JsonScalar = str | int | float | bool | None
-
-_EMPTY_METADATA: Mapping[str, JsonScalar] = MappingProxyType({})
 
 
 def _freeze_metadata(metadata: Mapping[str, JsonScalar]) -> Mapping[str, JsonScalar]:
@@ -83,7 +81,7 @@ class Document:
     source_uri: str
     text: str
     content_hash: str
-    metadata: Mapping[str, JsonScalar] = _EMPTY_METADATA
+    metadata: Mapping[str, JsonScalar] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         """Validate the field values (see the class docstring)."""
@@ -136,7 +134,7 @@ class Chunk:
     start_char: int
     end_char: int
     token_count: int
-    metadata: Mapping[str, JsonScalar] = _EMPTY_METADATA
+    metadata: Mapping[str, JsonScalar] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         """Validate the field values (see the class docstring)."""
