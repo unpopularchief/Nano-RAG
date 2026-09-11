@@ -1,0 +1,11 @@
+# Normalise line endings to LF for all tracked text by default.
+* text=auto eol=lf
+
+# Test fixtures carry deliberate, byte-exact content (CRLF files, BOMs,
+# non-UTF-8 encodings). Git must never rewrite their line endings or try to
+# diff them as text — the ingest/hashing tests assert on the exact bytes.
+tests/data/** -text -diff
+
+# Vendored tiktoken encoding cache: opaque binary blobs, keep verbatim.
+tests/data/tiktoken_cache/** -text -diff binary
+tests/data/tiktoken_cache/*.md text eol=lf -diff

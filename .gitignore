@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Virtual environments
+.venv/
+venv/
+
+# Testing / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.mypy_cache/
+.ruff_cache/
+
+# Nano RAG runtime artefacts — never committed
+.nanorag/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.npy
+
+# Secrets
+.env
+.env.*
+
+# Model / embedding caches downloaded at runtime
+.cache/
+models/
+*.onnx
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Local session handoff notes — not part of the project itself
+handoff.md
+plan.md

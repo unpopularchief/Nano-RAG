@@ -1,0 +1,101 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "nanorag"
+version = "0.0.1"
+description = "A small, readable, production-capable retrieval-augmented generation engine you can understand in an afternoon and run for free."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+authors = [{ name = "Niyaf Mukhthaar" }]
+keywords = ["rag", "retrieval", "embeddings", "llm", "numpy", "sqlite"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Text Processing :: Indexing",
+]
+
+# Core runtime dependencies — exactly three. See plan.md §3.
+dependencies = [
+    "numpy>=1.24",
+    "httpx>=0.27",
+    "tiktoken>=0.7",
+]
+
+[project.optional-dependencies]
+# DEFAULT embedder (Phase B). ~150 MB, no torch, CPU-fine. The README
+# quickstart is `uv add "nanorag[local]"`.
+local = ["fastembed", "onnxruntime"]
+# PDF loader lands Phase G. BSD, pure Python, no system libs.
+pdf = ["pypdf"]
+# HTML loader lands Phase G. MIT, fast C parser.
+html = ["selectolax"]
+dev = ["pytest>=7", "pytest-cov", "ruff", "pre-commit", "mypy", "hypothesis"]
+
+[project.urls]
+Repository = "https://github.com/unpopularchief/Nano-RAG"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nanorag"]
+
+[tool.pytest.ini_options]
+# The default run is offline, deterministic, keyless and model-free. Opt-in
+# markers (plan.md §12) carry everything slow or networked.
+addopts = "-m 'not local and not provider and not eval and not integration'"
+markers = [
+    "local: downloads and runs the real ONNX embedding model; offline but slow first run",
+    "provider: hits a real free-tier generation API; needs a key; opt-in",
+    "eval: runs the quality harness; slow",
+    "integration: needs docker services (Phase G)",
+]
+testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["nanorag"]
+branch = true
+
+[tool.ruff]
+line-length = 88
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "NPY", "D"]
+# D203/D213 conflict with D211/D212; NumPy-style docstrings follow D212
+# (summary on the line after the opening quotes).
+ignore = ["D203", "D213"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["D"]  # tests document intent through their names, not docstrings
+
+[tool.ruff.format]
+# Prose docs (README, plan.md, ROADMAP, docs/) are hand-formatted; ruff 0.16
+# reformats fenced Python blocks in Markdown, which mangles illustrative
+# snippets and would rewrite the authoritative plan.md. Python files only.
+exclude = ["*.md"]
+
+[tool.mypy]
+files = ["src"]
+strict = true
+# Analyse against 3.12 (the dev-pinned interpreter, plan.md §2). numpy's
+# published stubs use `type` statements that mypy only parses under >=3.12;
+# the >=3.11 runtime floor is enforced by ruff `UP` rules and `requires-python`.
+python_version = "3.12"
+
+[[tool.mypy.overrides]]
+# No upstream stubs; strict mode fails on the bare import otherwise.
+module = ["fastembed.*", "onnxruntime.*", "tiktoken.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_defs = false
+disallow_incomplete_defs = false

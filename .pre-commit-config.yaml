@@ -1,0 +1,30 @@
+# Mirrors CI exactly (plan.md §14). `pre-commit run --all-files` must agree
+# with the `ci.yml` lint/format/type gates.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.6
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.13.0
+    hooks:
+      - id: mypy
+        files: ^src/
+        additional_dependencies: [numpy, httpx]
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: ^tests/data/
+      - id: end-of-file-fixer
+        exclude: ^tests/data/
+      - id: check-added-large-files
+        # The vendored tiktoken encoding cache (tests/data/tiktoken_cache/) is a
+        # deliberate multi-MB blob; everything else stays under the default cap.
+        exclude: ^tests/data/tiktoken_cache/
+      - id: check-toml
+      - id: check-yaml
