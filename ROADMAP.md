@@ -7,8 +7,8 @@ contiguous release list.
 
 | Phase | Version | Goal | Status |
 | --- | --- | --- | --- |
-| **A — Foundation** | `v0.0.1` | Repo installs, lints, type-checks, tests, builds a wheel on Linux + Windows. Core data types. | **A1–A3 done; Gate A next** |
-| **B — Corpus to index** | `v0.0.4` | Real files → durable, searchable vectors. Fully offline. | not started |
+| **A — Foundation** | `v0.0.1` | Repo installs, lints, type-checks, tests, builds a wheel on Linux + Windows. Core data types. | **done; Gate A passed** |
+| **B — Corpus to index** | `v0.0.4` | Real files → durable, searchable vectors. Fully offline. | **B1 done; B2 next** |
 | **C — First answers (MVP)** | `v0.1.0` | Documents in, cited answer out — free key or fully offline. First public release. | not started |
 | **D — Trust** | `v0.3.0` | Citations resolving to text spans, a CLI, quality as numbers in CI (≥ 200-item eval set). | not started |
 | **E — Durability** | `v0.4.0` | Re-ingesting a changed corpus is correct and cheap. | not started |
@@ -19,16 +19,29 @@ contiguous release list.
 ## Phase A sessions
 
 - **A1** ✅ — `git init`, licence, ignore/attributes, `pyproject.toml`,
-  pre-commit, CI, doc skeletons. No library code. *(push + CI-green pending a
-  git remote.)*
+  pre-commit, CI, doc skeletons. No library code.
 - **A2** ✅ — `errors.py`, `hashing.py`, `types.py` + tests. Hash determinism
   verified in subprocesses under two `PYTHONHASHSEED` values; types immutable
   and validated.
 - **A3** ✅ — `tokens.py`, `config.py`, `tests/fakes.py` + tests. Config
   precedence (explicit > env > profile > `pyproject.toml` > default); fakes
   ready for every later phase.
-- **🚦 Gate A** — *next.* Toolchain and primitives reviewed before any I/O is
-  written.
+- **🚦 Gate A** ✅ — passed. CI green on all 6 matrix cells.
+
+## Phase B sessions
+
+- **B1** ✅ — `loaders/` (text, markdown, directory w/ glob+ignore),
+  `cleaning/normalize.py`, `IngestReport`/`LoadIssue`, fixture corpus in
+  `tests/data/`. `load_path()` produces identical `content_hash` regardless
+  of platform (relative POSIX `source_uri`, LF-normalising hash). Symlinks
+  always skipped, never followed. Gitignore-style glob matching
+  (`loaders/globbing.py`) — `*` stays within a path segment, `**` crosses
+  segments.
+- **B2** — chunking (`base`, `fixed`, `recursive`, `markdown`) — *next.*
+- **B3** — `store/sqlite_docs.py` + `store/numpy_store.py`.
+- **B4** — `embeddings/` (local ONNX via fastembed, cache, batching).
+- **🚦 Gate B** — storage schema and offline ingest path reviewed before
+  anything reads from them.
 
 ## Out of scope through 1.0
 

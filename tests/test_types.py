@@ -8,6 +8,8 @@ from nanorag.types import (
     Chunk,
     Citation,
     Document,
+    IngestReport,
+    LoadIssue,
     ScoredChunk,
     Timings,
     Usage,
@@ -267,3 +269,38 @@ def test_document_and_chunk_to_dict_round_trip_metadata():
     assert json.loads(json.dumps(doc.to_dict()))["metadata"] == {"lang": "en", "n": 3}
     chunk = make_chunk(metadata={"heading_path": "A/B"})
     assert chunk.to_dict()["metadata"] == {"heading_path": "A/B"}
+
+
+# --- LoadIssue / IngestReport ------------------------------------------
+
+
+def test_load_issue_is_frozen():
+    issue = LoadIssue(source_uri="a.pdf", reason="unrecognized extension")
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        issue.reason = "other"
+
+
+@pytest.mark.parametrize("field_name", ["source_uri", "reason"])
+def test_load_issue_rejects_empty_strings(field_name):
+    kwargs = dict(source_uri="a.pdf", reason="skipped")
+    kwargs[field_name] = ""
+    with pytest.raises(ValueError):
+        LoadIssue(**kwargs)
+
+
+def test_ingest_report_rejects_non_tuple_fields():
+    with pytest.raises(TypeError):
+        IngestReport(loaded=[], skipped=(), failed=())
+
+
+def test_ingest_report_to_dict_is_json_serialisable():
+    doc = Document("d0", "docs/a.md", "text", "hash")
+    report = IngestReport(
+        loaded=(doc,),
+        skipped=(LoadIssue("img.png", "unrecognized extension"),),
+        failed=(LoadIssue("bad.txt", "contains a NUL byte"),),
+    )
+    restored = json.loads(json.dumps(report.to_dict()))
+    assert restored["loaded"][0]["doc_id"] == "d0"
+    assert restored["skipped"][0]["reason"] == "unrecognized extension"
+    assert restored["failed"][0]["source_uri"] == "bad.txt"

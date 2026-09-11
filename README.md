@@ -4,13 +4,14 @@ A small, readable, production-capable retrieval-augmented generation **engine**
 — not a framework. The goal is that you can read the whole thing in an
 afternoon, run it against your own documents, and operate it for free.
 
-> **Status: Phase A (foundation).** The package installs, lints, type-checks,
-> tests and builds a wheel on Linux and Windows. So far it contains only the
-> primitives every later phase builds on — the core value types, the error
-> hierarchy, deterministic hashing, token counting and configuration. There is
-> no loader, retrieval, embedding or generation code yet. See [`plan.md`](plan.md)
-> §9 for the phased roadmap and [`ROADMAP.md`](ROADMAP.md) for the condensed
-> version.
+> **Status: Phase B, session B1 (corpus to index — loaders).** The package
+> installs, lints, type-checks, tests and builds a wheel on Linux and Windows.
+> Beyond Phase A's primitives (core value types, error hierarchy, deterministic
+> hashing, token counting, configuration), it now has text/markdown/directory
+> loaders and whitespace/unicode text normalisation — fully offline, no
+> network, no keys. There is no chunking, embedding, storage, retrieval or
+> generation code yet. See [`plan.md`](plan.md) §9 for the phased roadmap and
+> [`ROADMAP.md`](ROADMAP.md) for the condensed version.
 
 ## What it will be
 

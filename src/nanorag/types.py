@@ -5,7 +5,10 @@ library. ``Answer``, ``Citation``, ``Usage`` and ``Timings`` are the query
 path's output types: they are defined here so the read path can be built
 against them, but they stay **explicitly unstable until Gate C** — the field
 set is locked at ``v0.1.0`` against a working pipeline, not one phase ahead of
-it (plan.md §18 F11).
+it (plan.md §18 F11). ``IngestReport`` and ``LoadIssue`` are the write path's
+counterpart, introduced in Phase B; they carry the same "unstable until
+proven against a working path" caveat, informally, since deletion/update
+semantics (Phase E) will add fields.
 
 Metadata is a flat ``str -> JSON scalar`` mapping. Nesting is rejected: it
 breaks the filter grammar's compilation to bound SQL parameters and buys
@@ -385,4 +388,74 @@ class Answer:
             "truncated": self.truncated,
             "usage": self.usage.to_dict(),
             "timings": self.timings.to_dict(),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class LoadIssue:
+    """A source a loader encountered but did not turn into a ``Document``.
+
+    Used for both ``IngestReport.skipped`` (deliberately not attempted, e.g.
+    an unrecognised extension) and ``IngestReport.failed`` (attempted and
+    raised ``LoaderError``) — the two are told apart by which tuple they are
+    in, not by a field on this type.
+
+    Attributes
+    ----------
+    source_uri
+        The source that was not loaded.
+    reason
+        Human-readable explanation (not machine-parsed).
+
+    """
+
+    source_uri: str
+    reason: str
+
+    def __post_init__(self) -> None:
+        """Validate the field values (see the class docstring)."""
+        if not self.source_uri:
+            raise ValueError("LoadIssue.source_uri must be a non-empty string")
+        if not self.reason:
+            raise ValueError("LoadIssue.reason must be a non-empty string")
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-serialisable dict of this issue."""
+        return {"source_uri": self.source_uri, "reason": self.reason}
+
+
+@dataclass(frozen=True, slots=True)
+class IngestReport:
+    """The outcome of loading a batch of sources (a directory walk, so far).
+
+    Attributes
+    ----------
+    loaded
+        Documents successfully produced.
+    skipped
+        Sources deliberately not attempted (e.g. an unrecognised extension,
+        a symlink, an excluded path) — never passed to a ``Loader``.
+    failed
+        Sources a ``Loader`` attempted and raised ``LoaderError`` on. One
+        failure never aborts the batch — every other source is still
+        attempted.
+
+    """
+
+    loaded: tuple[Document, ...]
+    skipped: tuple[LoadIssue, ...]
+    failed: tuple[LoadIssue, ...]
+
+    def __post_init__(self) -> None:
+        """Validate the field values (see the class docstring)."""
+        for name in ("loaded", "skipped", "failed"):
+            if not isinstance(getattr(self, name), tuple):
+                raise TypeError(f"IngestReport.{name} must be a tuple")
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-serialisable dict of this report."""
+        return {
+            "loaded": [d.to_dict() for d in self.loaded],
+            "skipped": [i.to_dict() for i in self.skipped],
+            "failed": [i.to_dict() for i in self.failed],
         }

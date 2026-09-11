@@ -27,7 +27,9 @@ from nanorag.types import (
     Chunk,
     Citation,
     Document,
+    IngestReport,
     JsonScalar,
+    LoadIssue,
     ScoredChunk,
     Timings,
     Usage,
@@ -60,5 +62,7 @@ __all__ = [
     "Usage",
     "Timings",
     "Answer",
+    "IngestReport",
+    "LoadIssue",
     "JsonScalar",
 ]
