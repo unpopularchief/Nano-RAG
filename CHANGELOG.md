@@ -123,3 +123,32 @@ breaking changes bump the minor).
     checkpoint).
   - 238 tests, 100% coverage on the new `chunking/` package (99% on `src/`
     overall — the same pre-existing symlink-branch gap from B1).
+- **Phase B3 — storage.**
+  - `store/sqlite_docs.py`: `SqliteDocumentStore` — SQLite-backed
+    `documents` / `chunks` / `embeddings` / `meta` tables.
+    `upsert_document()` writes a document and replaces its chunks in one
+    transaction; a re-ingest's stale chunks (and, via `ON DELETE CASCADE`,
+    their embeddings) are removed, and a failure partway through leaves no
+    row changed. `upsert_embeddings()` persists vectors keyed by chunk id
+    under a recorded `(model_id, dim)`, raising `IndexModelMismatch` if a
+    second embedding model or dimension is used against the same index.
+    `iter_embeddings()` reads vectors back bit-exact, straight from the raw
+    `float32` BLOB — how a `NumpyVectorStore` is rebuilt after a restart
+    without re-running the embedder.
+  - `store/numpy_store.py`: `NumpyVectorStore` — an in-memory exact-cosine
+    index over L2-normalised vectors (`upsert`, `delete`, `compact`,
+    `search`). Implements the concurrency discipline plan.md §5 locks in
+    before Phase B: a single writer lock serialises mutations, and every
+    mutation rebuilds the matrix / id list / id-map / alive-mask as new
+    objects and rebinds all four together, so a `search` already holding a
+    prior snapshot (taken under the lock, computed outside it) is never
+    affected by a concurrent write. `delete()` tombstones rows; `compact()`
+    physically reclaims them. `search()`'s optional `allowed_ids` filter is
+    expressed in id space, not row-index space, so it survives a `compact()`.
+  - 40 new tests (documents/chunks round-trip through SQLite including a
+    Windows/Linux-stable schema, embeddings round-trip through BLOB
+    bit-exact, a mid-batch chunk insert failure leaves zero rows for that
+    document, a second embedding model/dim raises `IndexModelMismatch`, and
+    a reopen-and-rebuild test reproduces `NumpyVectorStore.search()` results
+    exactly — the B3 checkpoint). 100% coverage on the new `store/` package
+    (99% on `src/` overall — the same pre-existing symlink-branch gap).

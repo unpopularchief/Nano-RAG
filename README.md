@@ -4,16 +4,15 @@ A small, readable, production-capable retrieval-augmented generation **engine**
 — not a framework. The goal is that you can read the whole thing in an
 afternoon, run it against your own documents, and operate it for free.
 
-> **Status: Phase B, session B2 (corpus to index — chunking).** The package
+> **Status: Phase B, session B3 (corpus to index — storage).** The package
 > installs, lints, type-checks, tests and builds a wheel on Linux and Windows.
-> Beyond Phase A's primitives (core value types, error hierarchy, deterministic
-> hashing, token counting, configuration) and B1's loaders/cleaning, it now
-> splits a `Document` into offset-correct `Chunk`s three ways — fixed-size
-> windows, structure-aware recursive splitting (the default), and
-> heading-aware markdown chunking — fully offline, no network, no keys. There
-> is no embedding, storage, retrieval or generation code yet. See
-> [`plan.md`](plan.md) §9 for the phased roadmap and [`ROADMAP.md`](ROADMAP.md)
-> for the condensed version.
+> Beyond Phase A's primitives, B1's loaders/cleaning and B2's chunkers, it now
+> has durable storage: `SqliteDocumentStore` (documents, chunks and embeddings,
+> one transaction per document, cascading delete) and `NumpyVectorStore` (an
+> in-memory exact-cosine index — upsert, delete, compact, top-k search) — both
+> fully offline, no network, no keys. There is no embedding, retrieval or
+> generation code yet. See [`plan.md`](plan.md) §9 for the phased roadmap and
+> [`ROADMAP.md`](ROADMAP.md) for the condensed version.
 
 ## What it will be
 
