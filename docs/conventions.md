@@ -48,7 +48,24 @@ Reserved `nanorag.*` metadata key namespace.
   services. A provider is a ~150-line HTTP client behind a `Protocol`.
 - Core logic never imports a provider. Provider/embedder classes are reached
   through `nanorag.generation` / `nanorag.embeddings`, never the top level, so
-  `import nanorag` never pulls `httpx`, `fastembed` or `onnxruntime`.
+  `import nanorag` never pulls `httpx`, `fastembed` or `onnxruntime`. `Rag`
+  and the two HTTP clients resolve lazily (PEP 562 `__getattr__`) for the
+  same reason; a test asserts the boundary in a clean subprocess.
+- A client never lets a raw HTTP exception escape: every failure becomes one
+  of the typed errors in `errors.py` (`AuthError`, `RateLimitError`,
+  `QuotaExhausted`, `TransientError`, `ProviderError`), and the retry /
+  fallback logic acts on the type, never on a status code. Retry only
+  `RateLimitError` and `TransientError`; never a 4xx.
+- The key is held privately and never appears in `repr()`, a log line or an
+  exception. `__repr__` shows provider and model only.
+
+## Facade
+
+`Rag` composes public functions and owns no logic (plan.md §5 rule 1). Any
+arithmetic the read path needs (`context_budget`, `insufficient_context`,
+`load_vectors`) is a module-level function in `pipeline.py`, and a test
+reproduces `Rag.query()` from those functions alone. If a behaviour exists
+only inside the facade, that is a bug.
 
 ## Configuration
 

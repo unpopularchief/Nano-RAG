@@ -247,7 +247,7 @@ def test_fake_generator_receives_the_exact_prompt_and_labels_resolve():
     prompt = PromptBuilder().build("What did the cat do?", ctx)
 
     generator = FakeGenerator(["The cat sat. [1]"])
-    answer = generator.generate(prompt.as_text())
+    answer = generator.generate(prompt).text
 
     assert generator.last_prompt == prompt.as_text()
     assert prompt.nonce in generator.last_prompt

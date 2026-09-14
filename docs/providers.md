@@ -53,11 +53,57 @@ Never written to disk, never logged, never in `repr()` or exception text.
 `.env` support is a three-line optional read in the CLI, not a dependency.
 CI never holds a key — the default suite is fully offline against fakes.
 
+## Clients
+
+`nanorag.generation.OpenAICompatGenerator(preset, model)` covers Groq,
+OpenRouter and Ollama (and any other OpenAI-wire-format server — a new
+`Preset` line, not a new file); `GeminiGenerator(model)` covers Gemini. Both
+expose `context_window` and `max_output_tokens` — the pipeline budgets
+context from those, never from a constant — and both turn HTTP failures into
+the typed errors in `nanorag.errors`:
+
+| Response | Error | Retried? |
+| --- | --- | --- |
+| 401 / 403 | `AuthError` | no — surfaced, never hidden by fallback |
+| 429 naming a **daily** cap (Groq RPD/TPD, a Gemini `…PerDay…` quota) | `QuotaExhausted` | no — straight to the fallback |
+| any other 429 | `RateLimitError` (carries `Retry-After`) | yes, honouring `Retry-After` |
+| 404 / `model_not_found` (a retired model name) | `ProviderError` tagged `code="model_not_found"` | no — straight to the fallback |
+| 5xx, timeout, connection failure | `TransientError` | yes, bounded exponential backoff with jitter |
+| any other 4xx | `ProviderError` | no |
+
+`ratelimit.RateLimiter(rpm=, tpm=, rpd=)` can be handed to a client to keep
+under a tier's caps proactively; the retry loop pushes every `Retry-After`
+into it as a hold. Groq's free tier at the time of writing: ~30 RPM,
+~1K requests/day on the 70B model — set `rpm=30, rpd=1000` to stay polite.
+
 ## Fallback
 
 `from_defaults()` picks the generator by what is available: Groq key → Groq;
-else Gemini key → Gemini; else a reachable Ollama → Ollama; else a
-`ConfigError` naming all three. It prints which it chose. Automatic fallback
-between generators triggers on `QuotaExhausted`, `ProviderError` **and** a
-retired model name; `Answer.usage` records which provider actually served the
-query. The rate limiter is per-process — run one process per key.
+Gemini key → Gemini; a reachable Ollama (`GET localhost:11434/v1/models`)
+→ Ollama — and **chains every option it finds, in that order**, as a
+`FallbackGenerator`; nothing available raises a `ConfigError` naming all
+three. It logs which it chose at `INFO`. A named
+`generator_preset` (`NANORAG_GENERATOR_PRESET=ollama`, or the `local`
+profile) uses only that one. Fallback triggers on `QuotaExhausted`, any
+`ProviderError` (a retired model name included) and a `RateLimitError` /
+`TransientError` that survived the client's own retries — **not** on
+`AuthError`, because a rejected key is a configuration problem you want to
+see, not one to answer around from a different account. Every hand-off is
+logged at `WARNING` and `Answer.usage.provider` records which member
+actually served the query. The chain budgets context to the *smallest*
+window among its members (Ollama's 4096 when it is in the chain), so the
+prompt fits whoever ends up serving. The rate limiter is per-process — run
+one process per key.
+
+## Context windows and token counting
+
+The token budget for retrieved context is `(window − reserved output −
+prompt overhead) × (1 − margin)`, read from the generator. Counting uses
+`tiktoken` cl100k — an approximation for the Llama / Gemini / Qwen
+tokenizers actually in play — so the default margin is 15 %, and after
+every call the provider's reported prompt tokens are compared with the
+local estimate: exceeding the margin logs a `WARNING` naming the fix (pass
+the generator's real tokenizer as `counter=`, or raise `budget_margin`).
+**Ollama serves every model with a fixed 4096-token context by default**
+(`OLLAMA_CONTEXT_LENGTH`), whatever the model card says — the `OLLAMA`
+preset assumes exactly that; override `context_window=` if you raised it.

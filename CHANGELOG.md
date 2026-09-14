@@ -324,3 +324,115 @@ breaking changes bump the minor).
     context -> prompt -> `FakeGenerator` -> `[n]` resolution to a chunk id.
   - 448 tests in the default suite, 100% coverage on `context/` and
     `prompting/` (98% on `src/` overall, same pre-existing gaps).
+- **Phase C3 — generation, rate limiting, the pipeline. Phase C is now
+  feature-complete; Gate C review pending.**
+  - `ratelimit.py`: `RateLimiter(rpm=, tpm=, rpd=)` — one token bucket per
+    cap, refilled evenly, plus `hold(seconds)` for a provider's
+    `Retry-After`; `acquire(tokens)` sleeps (injectable) until admitted and
+    refuses outright a request larger than the per-minute token capacity.
+    `Backoff(max_retries, base_delay, max_delay)` — exponential with full
+    jitter, `Retry-After` honoured verbatim even above the ceiling.
+    `call_with_retry(fn, backoff=, limiter=)` — retries `RateLimitError` and
+    `TransientError` only (429, 5xx, timeouts); `AuthError`, `QuotaExhausted`
+    and any other error propagate on the first occurrence (plan.md §11).
+  - `generation/base.py`: the `Generator` protocol — `generate(Prompt) ->
+    Generation(text, usage)` plus `provider`, `model`, `context_window` and
+    `max_output_tokens`, so the context budget is read from the generator
+    and never hard-coded (plan.md §11). Written at the second
+    implementation, per the rule. Shared helpers `looks_like_daily_quota`
+    (day-specific wording only — the bare word "quota" appears in Gemini's
+    per-minute message) and `retry_after_seconds`.
+  - `generation/presets.py`: `Preset(name, base_url, api_key_env,
+    default_model, context_window)`; `GROQ` (`llama-3.3-70b-versatile`,
+    131k), `OPENROUTER`, `OLLAMA` (`qwen2.5:7b-instruct`, **4096** — Ollama's
+    server-side default context, not the model's).
+  - `generation/openai_compat.py`: `OpenAICompatGenerator(preset, model,
+    api_key=, context_window=, max_output_tokens=, temperature=, timeout=,
+    backoff=, limiter=, transport=)` — `POST /chat/completions` with a
+    system + user message. Error mapping: 401/403 → `AuthError`; 429 →
+    `QuotaExhausted` if the body describes a daily cap (Groq's RPD/TPD),
+    else `RateLimitError` carrying `Retry-After`; 404 / `model_not_found` →
+    `ProviderError` with `code="model_not_found"` (plan.md §18 F6); 5xx,
+    timeouts and connection failures → `TransientError`; other 4xx →
+    `ProviderError`. The key is held privately and never appears in
+    `repr()` or an exception.
+  - `generation/gemini.py`: `GeminiGenerator` — `POST
+    /models/{model}:generateContent` with `systemInstruction` + one user
+    content; default `gemini-2.5-flash`. Same error mapping keyed on
+    Gemini's `error.status` (`UNAUTHENTICATED` / `PERMISSION_DENIED`,
+    `RESOURCE_EXHAUSTED`, `NOT_FOUND`).
+  - `generation/fallback.py`: `FallbackGenerator(primary, *fallbacks)` —
+    itself a `Generator`. Hands off to the next member on `QuotaExhausted`,
+    any `ProviderError` (a retired model name included), and a
+    `RateLimitError` / `TransientError` that survived the client's own
+    retries; **not** on `AuthError` (a rejected key is surfaced, not papered
+    over). Every hand-off is logged at `WARNING`; `Usage.provider` names
+    the member that served; the chain's `context_window` /
+    `max_output_tokens` are the minimum across members.
+  - `generation/__init__.py`: protocol, presets and the chain are exported
+    eagerly; the two `httpx` clients resolve lazily, so `nanorag.pipeline`
+    stays `httpx`-free until `from_defaults()` picks a provider.
+  - `observability/timing.py`: `Timer` — `with timer.stage("retrieve"):`
+    accumulates milliseconds per `Timings` field; `timings()` fills
+    `Answer.timings`, `total_ms` being wall clock since creation.
+  - `pipeline.py`: `Rag(embedder=, generator=, docs=, vectors=None,
+    chunker=, loader=, prompt_builder=, counter=, k=8, budget_margin=0.15,
+    min_results=1, min_gap=0.0)`. `ingest_path()` / `ingest()` — chunk,
+    embed, `upsert_document` + `upsert_embeddings` in SQLite **then** update
+    the in-memory index (stale rows of a re-ingested document deleted from
+    it; plan.md §18 F2 ordering). `retrieve()` — the retriever. `query()` —
+    retrieve → `context_budget()` → `ContextBuilder` → `insufficient_context()`
+    → `PromptBuilder` → `generator.generate()` → `Answer`, each a public
+    function a caller can run by hand (plan.md §5 rule 1, §15 #5). Zero
+    context blocks return `INSUFFICIENT_CONTEXT_TEXT` with
+    `insufficient_context=True`, `Usage.provider="none"` and **no model
+    call**; `Answer.truncated` and `Answer.contexts` come straight from the
+    `Context`. After each call the provider's reported prompt tokens are
+    reconciled against the local estimate and a `WARNING` is logged when
+    they exceed the margin (plan.md §18 F4). `context_budget(window,
+    max_output, overhead, margin=)`, `insufficient_context(hits,
+    min_results=, min_gap=)` (F10's relative signal; the gap check is
+    opt-in until calibrated at Gate C) and `load_vectors(docs, dim)` are
+    module-level. `Rag.from_defaults(persist_dir)` — `FastEmbedEmbedder`
+    wrapped in `BatchingEmbedder` + `CachingEmbedder` (`embeddings.sqlite`),
+    `SqliteDocumentStore` (`nanorag.sqlite`), and `default_generator()`:
+    every available option — Groq key, Gemini key, reachable Ollama — chained
+    in that order (the Gate C recommendation), or a named
+    `generator_preset`; nothing available raises `ConfigError` naming all
+    three. `Rag` is exported from the top level lazily, so `import nanorag`
+    still pulls no `numpy`; `from nanorag import Rag` pulls `numpy` but no
+    `httpx`, `tiktoken`, `fastembed` or `onnxruntime` (asserted in a clean
+    subprocess).
+  - `tests/fakes.py`: `FakeGenerator` now satisfies the `Generator` protocol
+    (`generate(Prompt) -> Generation`, records `Prompt`s, can raise
+    scripted exceptions, exposes `context_window` / `max_output_tokens`).
+  - `benchmarks/search_latency.py`: the Phase C acceptance harness — builds
+    a 100k × 768 `NumpyVectorStore`, times unfiltered / 50 %-filtered /
+    2 %-filtered searches single-threaded, prints p50 / p95 / max and a
+    pass/fail line against 50 ms p95. Pins BLAS to one thread before
+    `numpy` is imported. Dev laptop, two runs: unfiltered p50 ~12 ms, p95
+    14–20 ms; filtered 50 % p95 19–44 ms; filtered 2 % p95 5–15 ms.
+  - `examples/quickstart.py` (the README's five lines, runnable with a Groq
+    key or with `NANORAG_PROFILE=local` and Ollama) and
+    `examples/offline_fakes.py` (the whole pipeline with fakes — no model,
+    key or network; run by CI under blocked sockets). Both ≤ 40 lines.
+  - Tests: `tests/test_ratelimit.py` (buckets under `FakeClock`,
+    `Retry-After` holds, jitter bounds, retry policy),
+    `tests/test_timing.py`, `tests/test_generation_openai_compat.py` and
+    `tests/test_generation_gemini.py` (recorded responses via
+    `httpx.MockTransport`: a real Groq 429 body with `Retry-After` retried
+    then raised, a daily-cap 429 as `QuotaExhausted`, `model_not_found`,
+    401/403, 5xx, timeouts, malformed bodies, the key absent from every
+    `repr()` / `str()`), `tests/test_generation_fallback.py` (quota
+    exhaustion, a provider error and a retired model name each fall back
+    Groq → Gemini over real clients and record `usage.provider="gemini"`;
+    `AuthError` does not), `tests/test_pipeline.py` (ingest → answer end to
+    end with fakes and no network; zero retrieved chunks → the defined
+    answer with no model call; truncation and the relative signal
+    propagate; `Rag.query()` reproduced from public functions alone;
+    persist → reopen reproduces retrieval; re-ingest drops stale vectors;
+    `default_generator` / `from_defaults` wiring), `tests/test_examples.py`,
+    and new package-level import-cost invariants.
+  - 585 tests in the default suite, 100% coverage on `ratelimit.py`,
+    `pipeline.py`, `generation/` and `observability/` (99% on `src/`
+    overall, same pre-existing gaps).

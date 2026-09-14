@@ -1,6 +1,9 @@
 import numpy as np
 import pytest
 
+from nanorag.errors import QuotaExhausted
+from nanorag.generation.base import Generation, Generator
+from nanorag.prompting.templates import Prompt
 from tests.fakes import FakeClock, FakeEmbedder, FakeGenerator
 
 
@@ -51,25 +54,50 @@ def test_embedder_rejects_bad_dim():
 # --- FakeGenerator ------------------------------------------------------
 
 
+def _prompt(user: str) -> Prompt:
+    return Prompt(system="sys", user=user, nonce="n")
+
+
 def test_generator_records_prompts():
     g = FakeGenerator()
-    g.generate("first prompt")
-    g.generate("second prompt")
-    assert g.calls == ["first prompt", "second prompt"]
-    assert g.last_prompt == "second prompt"
+    g.generate(_prompt("first prompt"))
+    g.generate(_prompt("second prompt"))
+    assert [c.user for c in g.calls] == ["first prompt", "second prompt"]
+    assert g.last_prompt == "sys" + chr(10) * 2 + "second prompt"
 
 
 def test_generator_returns_scripted_then_default():
     g = FakeGenerator(["a", "b"], default="fallback")
-    assert g.generate("p") == "a"
-    assert g.generate("p") == "b"
-    assert g.generate("p") == "fallback"
+    assert g.generate(_prompt("p")).text == "a"
+    assert g.generate(_prompt("p")).text == "b"
+    assert g.generate(_prompt("p")).text == "fallback"
 
 
 def test_generator_queue_appends_responses():
     g = FakeGenerator(default="d")
     g.queue("x", "y")
-    assert [g.generate("p"), g.generate("p"), g.generate("p")] == ["x", "y", "d"]
+    got = [g.generate(_prompt("p")).text for _ in range(3)]
+    assert got == ["x", "y", "d"]
+
+
+def test_generator_raises_a_scripted_exception_then_continues():
+    g = FakeGenerator([QuotaExhausted("spent"), "after"])
+    with pytest.raises(QuotaExhausted):
+        g.generate(_prompt("p"))
+    assert g.generate(_prompt("p")).text == "after"
+    assert len(g.calls) == 2
+
+
+def test_generator_reports_usage_and_satisfies_the_protocol():
+    g = FakeGenerator(provider="fake", model="fake-generator")
+    assert isinstance(g, Generator)
+    gen = g.generate(_prompt("hello"))
+    assert isinstance(gen, Generation)
+    assert gen.usage.provider == "fake"
+    assert gen.usage.model == "fake-generator"
+    assert gen.usage.prompt_tokens > 0
+    usage = gen.usage
+    assert usage.total_tokens == usage.prompt_tokens + usage.completion_tokens
 
 
 def test_generator_last_prompt_is_none_before_any_call():

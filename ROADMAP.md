@@ -9,7 +9,7 @@ contiguous release list.
 | --- | --- | --- | --- |
 | **A — Foundation** | `v0.0.1` | Repo installs, lints, type-checks, tests, builds a wheel on Linux + Windows. Core data types. | **done; Gate A passed** |
 | **B — Corpus to index** | `v0.0.4` | Real files → durable, searchable vectors. Fully offline. | **done; Gate B passed** |
-| **C — First answers (MVP)** | `v0.1.0` | Documents in, cited answer out — free key or fully offline. First public release. | **in progress — C1, C2 done** |
+| **C — First answers (MVP)** | `v0.1.0` | Documents in, cited answer out — free key or fully offline. First public release. | **feature-complete (C1–C3); Gate C review pending** |
 | **D — Trust** | `v0.3.0` | Citations resolving to text spans, a CLI, quality as numbers in CI (≥ 200-item eval set). | not started |
 | **E — Durability** | `v0.4.0` | Re-ingesting a changed corpus is correct and cheap. | not started |
 | **F — Quality** | `v0.6.0` | Beat the Phase D baseline with evidence — reranking, BM25/hybrid, MMR. Negative results published. | not started |
@@ -107,9 +107,48 @@ contiguous release list.
   whitespace-only, one character, far over budget, duplicates) and four
   counters including super- and sub-additive ones asserts the context
   never exceeds the budget.
-- **C3** — `ratelimit.py`, `generation/`, `pipeline.py`,
-  `observability/timing.py`, `benchmarks/`, first `examples/`. Not started.
-- **🚦 Gate C** — the MVP; decision checklist in `plan.md` §9.
+- **C3** ✅ — `ratelimit.py`, `generation/`, `pipeline.py`,
+  `observability/timing.py`, `benchmarks/`, first `examples/`.
+  `RateLimiter` (token buckets for RPM/TPM/RPD plus a `Retry-After` hold),
+  `Backoff` (bounded exponential, full jitter, `Retry-After` honoured
+  verbatim) and `call_with_retry` (retries 429 / 5xx / timeouts only; never
+  any other 4xx, never `QuotaExhausted`). `generation/`: the `Generator`
+  protocol (`generate(Prompt) -> Generation`, plus `context_window` and
+  `max_output_tokens` so the budget is read from the generator, never
+  hard-coded); `OpenAICompatGenerator` — one `httpx` client for every
+  OpenAI-wire-format service via a `Preset` (`GROQ`, `OPENROUTER`, `OLLAMA`
+  shipped); `GeminiGenerator` for Gemini's own schema; both map HTTP
+  failures to the typed errors (401/403 → `AuthError`; 429 →
+  `QuotaExhausted` when the body names a daily cap, else `RateLimitError`
+  with `Retry-After`; 404 → `ProviderError` tagged `model_not_found`; 5xx /
+  timeouts → `TransientError`) and never expose the key in `repr()` or an
+  exception. `FallbackGenerator` chains providers: quota exhaustion, a
+  provider error, a retired model name, or a rate limit / transient failure
+  that survived the client's retries all hand off to the next member (a
+  rejected key does not — that is a configuration problem to surface), and
+  `Usage.provider` records who served. `pipeline.py`: `Rag` — ~30 lines of
+  composition; `context_budget()` (window − output − overhead, × (1 −
+  margin)), `insufficient_context()` (the F10 relative signal: count floor
+  plus an opt-in top-1-vs-rest gap) and `load_vectors()` are public
+  functions it merely sequences. Zero context blocks return the fixed
+  `INSUFFICIENT_CONTEXT_TEXT` with `insufficient_context=True` and no model
+  call. `from_defaults()` wires local ONNX embeddings (cached, batched) +
+  SQLite under `persist_dir` and chains every available generator (Groq →
+  Gemini → Ollama). `observability/timing.py`: `Timer` → `Answer.timings`.
+  `benchmarks/search_latency.py`: the acceptance harness — 100k × 768
+  unfiltered p95 14–20 ms across runs, single-threaded, on the dev laptop
+  (limit 50 ms); filtered 50 % 19–44 ms, 2 % 5–15 ms. `examples/quickstart.py` (the README
+  flow) and `examples/offline_fakes.py` (no model, key or network; run in
+  CI). Checkpoint: the README quickstart works with fakes in CI
+  (`tests/test_examples.py`); the Groq and Ollama legs need a key / a local
+  server and are part of the Gate C review, not the default suite.
+- **🚦 Gate C** — the MVP. **Pending.** Decision checklist in `plan.md` §9:
+  freeze `Answer`; confirm `from_defaults()` auto-chaining (implemented as
+  recommended); lock the `insufficient_context` thresholds against a real
+  corpus (`min_gap` ships disabled — only the count floor is active until
+  measured); confirm F1–F4 (F4 taken as the margin + `usage` reconciliation
+  route, no `tokenizers` dependency); the design-hold review on a real
+  corpus; and the three-way quickstart run (Groq key / Ollama / fakes).
 
 ## Out of scope through 1.0
 

@@ -4,6 +4,8 @@ import importlib
 import subprocess
 import sys
 
+import pytest
+
 import nanorag
 
 
@@ -46,5 +48,43 @@ def test_every_submodule_imports_cleanly():
         "nanorag.hashing",
         "nanorag.tokens",
         "nanorag.config",
+        "nanorag.ratelimit",
+        "nanorag.pipeline",
+        "nanorag.observability",
+        "nanorag.generation",
     ):
         importlib.import_module(mod)
+
+
+def test_rag_is_resolved_lazily_from_the_top_level():
+    from nanorag import Rag
+    from nanorag.pipeline import Rag as Direct
+
+    assert Rag is Direct
+    assert "Rag" in nanorag.__all__
+    with pytest.raises(AttributeError):
+        nanorag.no_such_name  # noqa: B018
+
+
+def test_pipeline_and_generation_pull_no_provider_client_or_model_runtime():
+    # Phase C invariant (plan.md §7): `from nanorag import Rag` may pull numpy
+    # (the stores) but never httpx, fastembed, onnxruntime or tiktoken —
+    # the concrete provider is imported by `from_defaults()` at call time.
+    code = (
+        "import sys; from nanorag import Rag; import nanorag.generation; "
+        "heavy = {'httpx', 'fastembed', 'onnxruntime', 'tiktoken'}; "
+        "print(sorted(heavy & set(sys.modules)))"
+    )
+    out = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, check=True
+    )
+    assert out.stdout.strip() == "[]", out.stdout
+
+
+def test_generation_clients_are_resolved_lazily():
+    import nanorag.generation as generation
+
+    assert generation.OpenAICompatGenerator.__name__ == "OpenAICompatGenerator"
+    assert generation.GeminiGenerator.__name__ == "GeminiGenerator"
+    with pytest.raises(AttributeError):
+        generation.NoSuchGenerator  # noqa: B018

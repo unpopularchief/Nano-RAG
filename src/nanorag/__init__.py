@@ -1,10 +1,16 @@
 """Nano RAG — a small, readable retrieval-augmented generation engine.
 
-The public surface grows one phase at a time (see ``plan.md`` §7). Phase A
-exports the core value types and the error hierarchy; provider and embedder
-classes are reached through ``nanorag.generation`` / ``nanorag.embeddings`` so
-that ``import nanorag`` never pulls ``httpx``, ``fastembed`` or ``onnxruntime``.
+The public surface grows one phase at a time (see ``plan.md`` §7). The core
+value types and the error hierarchy are exported eagerly. ``Rag`` (the
+facade) is resolved lazily on first access — its stores need ``numpy`` —
+and provider and embedder classes are reached through ``nanorag.generation``
+/ ``nanorag.embeddings``, so ``import nanorag`` never pulls ``numpy``,
+``httpx``, ``fastembed`` or ``onnxruntime``.
 """
+
+from __future__ import annotations
+
+from typing import Any
 
 from nanorag.errors import (
     AuthError,
@@ -39,6 +45,8 @@ __version__ = "0.0.1"
 
 __all__ = [
     "__version__",
+    # facade (lazy)
+    "Rag",
     # errors
     "NanoRagError",
     "ConfigError",
@@ -66,3 +74,12 @@ __all__ = [
     "LoadIssue",
     "JsonScalar",
 ]
+
+
+def __getattr__(name: str) -> Any:
+    """Resolve ``Rag`` on first access (see the module docstring)."""
+    if name == "Rag":
+        from nanorag.pipeline import Rag
+
+        return Rag
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

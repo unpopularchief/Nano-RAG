@@ -5,8 +5,9 @@ no real clock (plan.md §12).
 
 - ``FakeEmbedder`` — a hashing vectoriser. Texts that share words get similar
   vectors, so retrieval relationships are controllable in a test.
-- ``FakeGenerator`` — returns scripted (or default) responses and records the
-  exact prompt string it was handed.
+- ``FakeGenerator`` — a real ``Generator``: returns scripted (or default)
+  responses, raises scripted exceptions, and records the exact ``Prompt`` it
+  was handed.
 - ``FakeClock`` — advances only when told; ``sleep`` records the request
   instead of blocking.
 """
@@ -18,7 +19,10 @@ from collections.abc import Sequence
 
 import numpy as np
 
+from nanorag.generation.base import Generation
 from nanorag.hashing import normalize_text
+from nanorag.prompting.templates import Prompt
+from nanorag.types import Usage
 
 
 class FakeEmbedder:
@@ -58,48 +62,75 @@ class FakeEmbedder:
 
 
 class FakeGenerator:
-    """Returns scripted responses and records every prompt it receives.
+    """A ``Generator`` that returns scripted responses and records every prompt.
+
+    Satisfies :class:`nanorag.generation.Generator` (the protocol's third
+    implementation, after the two HTTP clients). Scripted entries may be
+    strings (returned as the completion text) or exceptions (raised on that
+    call) — the latter is how fallback and retry paths are driven.
 
     Parameters
     ----------
     responses
-        Response strings, returned one per ``generate`` call in order. Once
-        exhausted, ``default`` is returned for every further call.
+        Entries consumed one per ``generate`` call in order. Once exhausted,
+        ``default`` is returned for every further call.
     default
-        The fallback response.
-    model_id, provider
-        Identifiers a later phase's ``Usage`` will want.
+        The fallback response text.
+    model, provider
+        Recorded on the returned ``Usage``.
+    context_window, max_output_tokens
+        What the pipeline budgets against; small by default so tests can
+        hit truncation cheaply.
     """
 
     def __init__(
         self,
-        responses: Sequence[str] | None = None,
+        responses: Sequence[str | Exception] | None = None,
         *,
         default: str = "Fake answer grounded in the context. [1]",
-        model_id: str = "fake-generator",
+        model: str = "fake-generator",
         provider: str = "fake",
+        context_window: int = 4096,
+        max_output_tokens: int = 256,
     ) -> None:
         self._responses = list(responses) if responses is not None else []
         self._default = default
-        self.model_id = model_id
+        self.model = model
         self.provider = provider
-        self.calls: list[str] = []
+        self.context_window = context_window
+        self.max_output_tokens = max_output_tokens
+        self.calls: list[Prompt] = []
 
     @property
     def last_prompt(self) -> str | None:
-        """The most recent prompt handed to ``generate``, or ``None``."""
-        return self.calls[-1] if self.calls else None
+        """The most recent prompt (flattened to text), or ``None``."""
+        return self.calls[-1].as_text() if self.calls else None
 
-    def queue(self, *responses: str) -> None:
-        """Append more scripted responses."""
+    def queue(self, *responses: str | Exception) -> None:
+        """Append more scripted responses (or exceptions to raise)."""
         self._responses.extend(responses)
 
-    def generate(self, prompt: str) -> str:
-        """Record *prompt* and return the next scripted (or default) response."""
+    def generate(self, prompt: Prompt) -> Generation:
+        """Record *prompt*; return the next scripted response or raise it."""
         self.calls.append(prompt)
+        item: str | Exception = self._default
         if self._responses:
-            return self._responses.pop(0)
-        return self._default
+            item = self._responses.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        text = prompt.as_text()
+        prompt_tokens = (len(text) + 3) // 4
+        completion_tokens = (len(item) + 3) // 4
+        return Generation(
+            text=item,
+            usage=Usage(
+                provider=self.provider,
+                model=self.model,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=prompt_tokens + completion_tokens,
+            ),
+        )
 
 
 class FakeClock:
