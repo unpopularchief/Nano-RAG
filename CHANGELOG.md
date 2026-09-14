@@ -195,3 +195,29 @@ breaking changes bump the minor).
     combined (99% on `src/` overall in the default run alone, since
     `local.py`'s model-calling lines are only exercised under `-m local` —
     same pre-existing symlink-branch gap otherwise).
+- **Gate B review — closed.** Auditing plan.md §9's Phase B block against
+  the actual code/tests (not just the session summaries) found the
+  phase-level **Acceptance** bullet had never been verified end-to-end: B1-B4
+  each tested their own component in isolation, but nothing wired the full
+  pipeline together, and no test had ever actually blocked sockets to prove
+  the "no network access" claim (it was only true by construction).
+  - `tests/conftest.py`: `blocked_sockets` — a context manager that patches
+    `socket.socket.connect`/`connect_ex` (not the class itself, since
+    libraries construct real socket objects even on a call that never
+    reaches the network) to raise, proving an offline claim rather than
+    merely asserting no networking library was imported.
+  - `tests/test_gate_b_offline_ingest.py` (new, `-m local`): the literal
+    Phase B acceptance test. A synthetic 200-document corpus (10,680 chunks)
+    goes through `DirectoryLoader` -> `FixedChunker` ->
+    `CachingEmbedder(BatchingEmbedder(FastEmbedEmbedder(...)))` ->
+    `SqliteDocumentStore` + `NumpyVectorStore`, entirely inside
+    `blocked_sockets()`. The store is then closed, reopened under a second
+    `blocked_sockets()` block, and the vector index rebuilt from SQLite
+    reproduces the pre-close search results exactly; a second identical
+    embed call is then proven to make zero calls to the real model.
+  - `tests/test_loaders.py`: `test_text_loader_handles_a_5mb_file` — the 5 MB
+    fixture named in the Phase B Tests bullet's fixture list, generated at
+    test time into `tmp_path` rather than committed (B1 had deferred this;
+    it was never actually added).
+  - 324 tests passing across the combined default + `-m local` suite (2
+    skipped, the usual symlink cause), 99% coverage on `src/`.

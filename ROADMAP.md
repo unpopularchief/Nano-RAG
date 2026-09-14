@@ -8,7 +8,7 @@ contiguous release list.
 | Phase | Version | Goal | Status |
 | --- | --- | --- | --- |
 | **A — Foundation** | `v0.0.1` | Repo installs, lints, type-checks, tests, builds a wheel on Linux + Windows. Core data types. | **done; Gate A passed** |
-| **B — Corpus to index** | `v0.0.4` | Real files → durable, searchable vectors. Fully offline. | **B1–B4 done; Gate B next** |
+| **B — Corpus to index** | `v0.0.4` | Real files → durable, searchable vectors. Fully offline. | **done; Gate B passed** |
 | **C — First answers (MVP)** | `v0.1.0` | Documents in, cited answer out — free key or fully offline. First public release. | not started |
 | **D — Trust** | `v0.3.0` | Citations resolving to text spans, a CLI, quality as numbers in CI (≥ 200-item eval set). | not started |
 | **E — Durability** | `v0.4.0` | Re-ingesting a changed corpus is correct and cheap. | not started |
@@ -57,8 +57,20 @@ contiguous release list.
   `chunk_id`, so a re-ingest re-embeds only chunks whose text actually
   changed. Checkpoint met: 10k chunks embedded locally, a second run against
   the same on-disk cache makes zero model calls.
-- **🚦 Gate B** — storage schema and offline ingest path reviewed before
-  anything reads from them. *next.*
+- **🚦 Gate B** ✅ — passed. Reviewed against plan.md §9's Phase B block item
+  by item; the phase-level Acceptance bullet ("10k chunks ingest and persist
+  with no network access at all, verified by blocking sockets in the test;
+  reopen + search reproduces pre-restart results exactly; a second identical
+  ingest performs zero embedding work") had never been tested end-to-end —
+  each session proved its own component in isolation. Closed by adding
+  `tests/test_gate_b_offline_ingest.py`: a 200-document, 10,680-chunk
+  synthetic corpus through the real `DirectoryLoader` → `FixedChunker` →
+  `FastEmbedEmbedder`(cached, batched) → `SqliteDocumentStore` +
+  `NumpyVectorStore` pipeline, inside a `blocked_sockets()` context
+  (`tests/conftest.py`, patches `socket.socket.connect`/`connect_ex`) —
+  reopen reproduces search exactly, and a second identical run makes zero
+  calls to the real model. Also added the 5 MB fixture test the Phase B
+  Tests bullet calls for (generated at test time, not committed).
 
 ## Out of scope through 1.0
 

@@ -74,6 +74,20 @@ def test_text_loader_doc_id_and_content_hash_are_deterministic():
     assert a.content_hash == b.content_hash
 
 
+def test_text_loader_handles_a_5mb_file(tmp_path):
+    # plan.md §9 Phase B fixture list includes a 5 MB file. Generated at test
+    # time rather than committed — 5 MB of fixture text is poor hygiene for a
+    # project whose whole pitch is "small, readable" (B1 handoff note).
+    text = "the quick brown fox jumps over the lazy dog. " * (5 * 1024 * 1024 // 46)
+    path = tmp_path / "large.txt"
+    path.write_text(text, encoding="utf-8")
+
+    doc = TextLoader().load(path)
+
+    assert doc.text == text
+    assert doc.content_hash == content_hash(text)
+
+
 # --- MarkdownLoader ------------------------------------------------------
 
 
