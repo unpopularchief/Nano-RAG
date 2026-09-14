@@ -8,7 +8,7 @@ contiguous release list.
 | Phase | Version | Goal | Status |
 | --- | --- | --- | --- |
 | **A — Foundation** | `v0.0.1` | Repo installs, lints, type-checks, tests, builds a wheel on Linux + Windows. Core data types. | **done; Gate A passed** |
-| **B — Corpus to index** | `v0.0.4` | Real files → durable, searchable vectors. Fully offline. | **B1–B3 done; B4 next** |
+| **B — Corpus to index** | `v0.0.4` | Real files → durable, searchable vectors. Fully offline. | **B1–B4 done; Gate B next** |
 | **C — First answers (MVP)** | `v0.1.0` | Documents in, cited answer out — free key or fully offline. First public release. | not started |
 | **D — Trust** | `v0.3.0` | Citations resolving to text spans, a CLI, quality as numbers in CI (≥ 200-item eval set). | not started |
 | **E — Durability** | `v0.4.0` | Re-ingesting a changed corpus is correct and cheap. | not started |
@@ -49,9 +49,16 @@ contiguous release list.
   used); `NumpyVectorStore` is an in-memory exact-cosine index (upsert,
   tombstone-delete, compact, top-k search) rebuilt from the SQLite
   embeddings on reopen, reproducing search results exactly.
-- **B4** — `embeddings/` (local ONNX via fastembed, cache, batching). *next.*
+- **B4** ✅ — `embeddings/` (`base` protocol, `local` ONNX via fastembed,
+  `cache`, `batching`). `FastEmbedEmbedder` raises `ConfigError` naming the
+  install command if `[local]` is missing, defaults to single-threaded ONNX
+  execution for determinism, and L2-normalises at the boundary.
+  `CachingEmbedder` keys on `(model_id, sha256(normalised text))`, not
+  `chunk_id`, so a re-ingest re-embeds only chunks whose text actually
+  changed. Checkpoint met: 10k chunks embedded locally, a second run against
+  the same on-disk cache makes zero model calls.
 - **🚦 Gate B** — storage schema and offline ingest path reviewed before
-  anything reads from them.
+  anything reads from them. *next.*
 
 ## Out of scope through 1.0
 

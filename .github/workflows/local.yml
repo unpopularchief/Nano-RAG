@@ -1,0 +1,37 @@
+name: Local embeddings
+
+# Runs the opt-in `-m local` suite against the real ONNX embedder
+# (nanorag.embeddings.local.FastEmbedEmbedder). Kept out of ci.yml's matrix
+# per plan.md §12: real-embedder tests are offline after the first download
+# but too slow to duplicate across 6 matrix cells, so this runs on one fixed
+# image and caches the downloaded model between runs.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Cache fastembed models
+        uses: actions/cache@v4
+        with:
+          path: /tmp/fastembed_cache
+          key: fastembed-models-v1-${{ hashFiles('src/nanorag/embeddings/local.py') }}
+
+      - name: Install dependencies
+        run: uv sync --extra dev --extra local --python 3.12
+
+      - name: Test (local embedder)
+        run: uv run pytest -q -m local

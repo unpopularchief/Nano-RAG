@@ -152,3 +152,46 @@ breaking changes bump the minor).
     a reopen-and-rebuild test reproduces `NumpyVectorStore.search()` results
     exactly — the B3 checkpoint). 100% coverage on the new `store/` package
     (99% on `src/` overall — the same pre-existing symlink-branch gap).
+- **Phase B4 — embeddings. Phase B is now feature-complete.**
+  - `embeddings/base.py`: the `Embedder` protocol (`embed`, `embed_query`,
+    `dim`, `model_id`). `FakeEmbedder` (Phase A) is its second
+    implementation, so writing the protocol here does not break the
+    "a Protocol is written at the second implementation" rule.
+  - `embeddings/local.py`: `FastEmbedEmbedder` — local ONNX embeddings via
+    `fastembed`, no torch. Lazy-imports `fastembed`/`onnxruntime` inside
+    `__init__` (never at import time), raising `ConfigError` naming the exact
+    `uv add "nanorag[local]"` install command if the extra is missing.
+    Resolves a model's dimension via `TextEmbedding.get_embedding_size()`
+    before constructing the ONNX session. Defaults to `threads=1` for
+    deterministic execution (plan.md §18 F5) and explicitly L2-normalises
+    every output vector at the boundary regardless of what the backend
+    already does. Wraps third-party exceptions in `EmbeddingError`.
+  - `embeddings/cache.py`: `EmbeddingCache` (SQLite-backed
+    `(model_id, text_hash) -> vector` store) and `CachingEmbedder` (wraps any
+    `Embedder`, serving `embed()` from the cache and computing only the
+    misses). Keyed by `sha256(normalize_text(chunk text))`, never by
+    `chunk_id` — a chunk whose text is unchanged still hits the cache even
+    when an upstream edit shifted its ordinal (and therefore its id).
+    `embed_query()` always delegates, uncached — queries are called once
+    each and, for some models, are not the same vector space as a document
+    embedding of the same text.
+  - `embeddings/batching.py`: `batched()` and `BatchingEmbedder`, bounding
+    how many texts reach an embedder in one call, independent of whatever
+    batching the wrapped embedder already does. The one place any
+    concurrency for embedding would live (plan.md §15 #21); stays
+    synchronous — local embedding is CPU-bound with no rate limit to
+    respect, so there is nothing yet for a thread pool to buy.
+  - `.github/workflows/local.yml`: runs the opt-in `-m local` suite on one
+    fixed runner image (plan.md §12), caching the downloaded ONNX model
+    between runs.
+  - 34 new tests: default-suite unit tests for the protocol, cache and
+    batching against `FakeEmbedder` (no model download), plus an opt-in
+    `-m local` suite against the real ONNX model — construction, L2
+    normalisation, determinism within a build, the missing-`[local]`-extra
+    `ConfigError`, and the B4 checkpoint itself: 10,000 chunks embedded
+    locally, then a second run against a fresh `EmbeddingCache` at the same
+    path makes zero calls to the model. 100% coverage on the new
+    `embeddings/` package when the default and `-m local` suites are
+    combined (99% on `src/` overall in the default run alone, since
+    `local.py`'s model-calling lines are only exercised under `-m local` —
+    same pre-existing symlink-branch gap otherwise).

@@ -4,15 +4,18 @@ A small, readable, production-capable retrieval-augmented generation **engine**
 — not a framework. The goal is that you can read the whole thing in an
 afternoon, run it against your own documents, and operate it for free.
 
-> **Status: Phase B, session B3 (corpus to index — storage).** The package
-> installs, lints, type-checks, tests and builds a wheel on Linux and Windows.
-> Beyond Phase A's primitives, B1's loaders/cleaning and B2's chunkers, it now
-> has durable storage: `SqliteDocumentStore` (documents, chunks and embeddings,
-> one transaction per document, cascading delete) and `NumpyVectorStore` (an
-> in-memory exact-cosine index — upsert, delete, compact, top-k search) — both
-> fully offline, no network, no keys. There is no embedding, retrieval or
-> generation code yet. See [`plan.md`](plan.md) §9 for the phased roadmap and
-> [`ROADMAP.md`](ROADMAP.md) for the condensed version.
+> **Status: Phase B, session B4 (corpus to index — embeddings). Phase B is
+> now feature-complete.** The package installs, lints, type-checks, tests and
+> builds a wheel on Linux and Windows. Beyond Phase A's primitives, B1's
+> loaders/cleaning, B2's chunkers and B3's storage (`SqliteDocumentStore`,
+> `NumpyVectorStore`), it now turns text into vectors: `FastEmbedEmbedder`
+> (local ONNX via `fastembed`, no torch), a persistent `EmbeddingCache` keyed
+> by model + normalised text (survives process restarts — a re-embed of
+> unchanged text is always free), and `BatchingEmbedder` to bound memory on
+> large batches — all fully offline after the first model download, no keys.
+> There is no retrieval or generation code yet. See [`plan.md`](plan.md) §9
+> for the phased roadmap and [`ROADMAP.md`](ROADMAP.md) for the condensed
+> version.
 
 ## What it will be
 
@@ -79,6 +82,15 @@ uv build
 
 CI runs the same on Ubuntu and Windows across Python 3.11 / 3.12 / 3.13. No CI
 job holds an API key.
+
+The default `pytest -q` run is offline, keyless and model-free. Real-embedder
+tests (`nanorag.embeddings.local.FastEmbedEmbedder`) are opt-in and download
+the pinned ONNX model on first run:
+
+```bash
+uv sync --extra dev --extra local
+uv run pytest -q -m local
+```
 
 ## Licence
 
