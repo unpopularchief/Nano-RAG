@@ -9,7 +9,7 @@ contiguous release list.
 | --- | --- | --- | --- |
 | **A — Foundation** | `v0.0.1` | Repo installs, lints, type-checks, tests, builds a wheel on Linux + Windows. Core data types. | **done; Gate A passed** |
 | **B — Corpus to index** | `v0.0.4` | Real files → durable, searchable vectors. Fully offline. | **done; Gate B passed** |
-| **C — First answers (MVP)** | `v0.1.0` | Documents in, cited answer out — free key or fully offline. First public release. | not started |
+| **C — First answers (MVP)** | `v0.1.0` | Documents in, cited answer out — free key or fully offline. First public release. | **in progress — C1 done** |
 | **D — Trust** | `v0.3.0` | Citations resolving to text spans, a CLI, quality as numbers in CI (≥ 200-item eval set). | not started |
 | **E — Durability** | `v0.4.0` | Re-ingesting a changed corpus is correct and cheap. | not started |
 | **F — Quality** | `v0.6.0` | Beat the Phase D baseline with evidence — reranking, BM25/hybrid, MMR. Negative results published. | not started |
@@ -71,6 +71,28 @@ contiguous release list.
   reopen reproduces search exactly, and a second identical run makes zero
   calls to the real model. Also added the 5 MB fixture test the Phase B
   Tests bullet calls for (generated at test time, not committed).
+
+## Phase C sessions
+
+- **C1** ✅ — `retrieval/dense.py` + `store/filters.py`. `DenseRetriever`
+  embeds the query, resolves the filter to chunk ids in SQLite, searches the
+  NumPy index over those ids only, and hydrates hits back into `Chunk`s. The
+  filter grammar (`$eq`/`$ne`/`$gt`/`$gte`/`$lt`/`$lte`/`$in`/`$nin`/
+  `$prefix`/`$exists`, `$and`/`$or`/`$not`; `chunk_id`/`doc_id`/`ordinal`/
+  `source_uri` columns plus any metadata key, chunk-then-document) compiles
+  to bound-parameter SQL and is Hypothesis-checked against a plain-Python
+  reference evaluator. `NumpyVectorStore.search` now breaks ties by chunk
+  id (row order differs between a live index and one rebuilt on reopen) and
+  no longer copies the whole matrix per query (100k × 768 unfiltered:
+  ~5 ms p95 locally, down from ~175 ms). Checkpoint met: retrieval matches a
+  brute-force NumPy reference exactly, filtered and unfiltered; a filter
+  matching nothing returns `[]`, not an error; a test proves post-filtering
+  silently loses results.
+- **C2** — `context/builder.py`, `prompting/templates.py` + `fencing.py`.
+  Not started.
+- **C3** — `ratelimit.py`, `generation/`, `pipeline.py`,
+  `observability/timing.py`, `benchmarks/`, first `examples/`. Not started.
+- **🚦 Gate C** — the MVP; decision checklist in `plan.md` §9.
 
 ## Out of scope through 1.0
 

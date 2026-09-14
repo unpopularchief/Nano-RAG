@@ -7,13 +7,17 @@ similarity is a plain dot product — exact, not approximate.
 
 Concurrency discipline (plan.md §5, decided before Phase B): a single writer
 lock serialises ``upsert``, ``delete`` and ``compact``. Every mutation builds
-a new matrix / id list / id-map / alive-mask rather than editing the existing
-ones in place, then rebinds all four together at the end of the locked
-section. A ``search`` that has already captured the previous objects (taken
-under the lock, in the instant before a concurrent mutation rebinds them)
-therefore always finishes against one self-consistent snapshot, never a
-partially-updated one — this is what makes it safe to do the actual cosine +
-top-k *outside* the lock.
+a new matrix / id list (and its array form) / id-map / alive-mask rather
+than editing the existing ones in place, then rebinds them all together at
+the end of the locked section. A ``search`` that has already captured the
+previous objects (taken under the lock, in the instant before a concurrent
+mutation rebinds them) therefore always finishes against one self-consistent
+snapshot, never a partially-updated one — this is what makes it safe to do
+the actual cosine + top-k *outside* the lock.
+
+Ties are broken by chunk id, never by row position: row order depends on
+insertion order, which differs between a live session and the same index
+rebuilt from SQLite on reopen, whereas the id order is the same everywhere.
 """
 
 from __future__ import annotations
@@ -24,6 +28,12 @@ from collections.abc import Collection, Sequence
 import numpy as np
 
 from nanorag.errors import StoreError
+
+#: Below this fraction of live candidates, ``search`` gathers the candidate
+#: rows into a copy before scoring; at or above it, it scores the whole
+#: matrix in place and masks the scores (gathering copies ``n × dim`` floats,
+#: which dominates the dot product itself once *n* is a sizeable share).
+_GATHER_FRACTION = 0.25
 
 
 class NumpyVectorStore:
@@ -44,6 +54,7 @@ class NumpyVectorStore:
         self._dim = dim
         self._lock = threading.Lock()
         self._ids: list[str] = []
+        self._id_array = np.empty((0,), dtype=str)  # ids, vectorised for search
         self._id_to_row: dict[str, int] = {}
         self._matrix = np.empty((0, dim), dtype=np.float32)
         self._alive = np.empty((0,), dtype=bool)
@@ -117,6 +128,7 @@ class NumpyVectorStore:
             self._matrix = matrix
             self._alive = alive
             self._ids = ids
+            self._id_array = np.array(ids, dtype=str)
             self._id_to_row = id_to_row
 
     def delete(self, chunk_ids: Sequence[str]) -> None:
@@ -154,6 +166,7 @@ class NumpyVectorStore:
 
             self._matrix = new_matrix
             self._ids = new_ids
+            self._id_array = np.array(new_ids, dtype=str)
             self._id_to_row = new_id_to_row
             self._alive = new_alive
 
@@ -165,6 +178,9 @@ class NumpyVectorStore:
         allowed_ids: Collection[str] | None = None,
     ) -> list[tuple[str, float]]:
         """Return up to *k* ``(chunk_id, score)`` pairs, highest score first.
+
+        Equal scores are ordered by chunk id, so the result is deterministic
+        regardless of insertion order (see the module docstring).
 
         Parameters
         ----------
@@ -200,6 +216,7 @@ class NumpyVectorStore:
         with self._lock:
             matrix = self._matrix
             ids = self._ids
+            id_array = self._id_array
             alive = self._alive
 
         if not ids:
@@ -214,10 +231,29 @@ class NumpyVectorStore:
             mask = mask & id_mask
 
         candidate_rows = np.flatnonzero(mask)
-        if candidate_rows.size == 0:
+        n = candidate_rows.size
+        if n == 0:
             return []
 
-        scores = matrix[candidate_rows] @ query
-        top_k = min(k, candidate_rows.size)
-        order = np.argsort(-scores, kind="stable")[:top_k]
-        return [(ids[candidate_rows[pos]], float(scores[pos])) for pos in order]
+        if n < _GATHER_FRACTION * len(ids):
+            # Few candidates: copy just those rows out and score them.
+            scores = matrix[candidate_rows] @ query
+        else:
+            # Most rows are candidates (the unfiltered case): scoring the
+            # whole matrix in place is far cheaper than fancy-indexing a
+            # copy of it — one dot product per row versus one copy per row.
+            scores = (matrix @ query)[candidate_rows]
+        if k >= n:
+            contenders = np.arange(n)
+        else:
+            # Everything scoring at or above the k-th best is a contender —
+            # including whatever ties with it at the boundary — so the
+            # id-ordered sort below decides the cut, not partition order.
+            kth_best = np.partition(scores, n - k)[n - k]
+            contenders = np.flatnonzero(scores >= kth_best)
+        # lexsort's last key is primary: score descending, then id ascending.
+        order = np.lexsort((id_array[candidate_rows[contenders]], -scores[contenders]))
+        return [
+            (ids[candidate_rows[pos]], float(scores[pos]))
+            for pos in contenders[order[:k]]
+        ]

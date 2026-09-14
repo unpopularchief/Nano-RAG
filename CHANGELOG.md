@@ -221,3 +221,55 @@ breaking changes bump the minor).
     it was never actually added).
   - 324 tests passing across the combined default + `-m local` suite (2
     skipped, the usual symlink cause), 99% coverage on `src/`.
+- **Phase C1 — dense retrieval and metadata pre-filtering.**
+  - `store/filters.py`: the filter grammar and `compile_filter`. A flat,
+    Mongo-shaped mapping — `key: scalar` shorthand, `$eq` / `$ne` / `$gt` /
+    `$gte` / `$lt` / `$lte` / `$in` / `$nin` / `$prefix` / `$exists`, and
+    `$and` / `$or` / `$not` — compiled to a SQL predicate over the
+    `chunks` × `documents` join with every operand bound as a parameter
+    (column names come from a fixed whitelist, never from the filter).
+    `chunk_id` / `doc_id` / `ordinal` / `source_uri` address columns;
+    any other key is a metadata key resolved chunk-first, then document,
+    via `json_extract`. Every leaf evaluates to exactly 0/1 so `$not` is a
+    plain negation; an absent key satisfies no comparison (use `$exists`);
+    range operators compare numbers with numbers and text with text only
+    (a `typeof` guard, since SQLite orders every number below every
+    string); column operands are type-checked at compile time so column
+    affinity can never silently coerce `ordinal = '3'`.
+  - `SqliteDocumentStore.filter_chunk_ids(filter)` (the pre-filter: a set
+    of chunk ids for `NumpyVectorStore.search(allowed_ids=...)`; matching
+    nothing returns an empty set, not an error) and `get_chunks_by_ids()`
+    (batched `IN` lookups; how hits become `Chunk`s again).
+  - `NumpyVectorStore.search`: ties are now broken by chunk id rather than
+    row position — row order is insertion order in a live index but
+    `chunk_id` order after a rebuild from SQLite, so the old order could
+    differ across a reopen. Implemented as partition-to-the-k-th-score +
+    lexsort over the contenders, so a boundary tie is cut by id too. Also
+    stops fancy-indexing a copy of the whole matrix on every search
+    (that copy, not the dot product, was ~95% of the query time): rows are
+    gathered only when candidates are under 25% of the index, otherwise
+    the matrix is scored in place. 100k × 768 unfiltered search: ~5 ms
+    p95 locally, from ~175 ms.
+  - `retrieval/dense.py`: `DenseRetriever(embedder, vectors, docs, k=10)`
+    with `retrieve(query, k=None, filter=None) -> list[ScoredChunk]`
+    (`source="dense"`). Four readable steps: embed the query, resolve the
+    filter in SQLite, search over the allowed ids, hydrate. Refuses a
+    dimension mismatch at construction; a hit whose chunk is missing from
+    the document store raises `RetrievalError` rather than being dropped
+    silently. No `Retriever` protocol yet — it arrives with the second
+    implementation (BM25, Phase F).
+  - Tests (`tests/test_filters.py`, `tests/test_dense_retriever.py`, plus
+    additions to `tests/test_numpy_store.py`): every operator against a
+    real store; 26 malformed filters each raise `RetrievalError`; SQL
+    injection via an operand is inert; a Hypothesis property test
+    (300 examples, random metadata × random filters up to 4 leaves deep)
+    asserts the compiled SQL agrees with a plain-Python reference
+    evaluator; the C1 checkpoint — retrieval matches a brute-force NumPy
+    reference exactly, unfiltered and filtered; a filter matching nothing
+    returns `[]`; ties are identical before and after a reopen; an explicit
+    test shows post-filtering the top-*k* loses every matching result where
+    pre-filtering returns all of them (plan.md §15 #7).
+  - 389 tests in the default suite, 100% coverage on `retrieval/`,
+    `store/filters.py`, `store/numpy_store.py`, `store/sqlite_docs.py`
+    (98% on `src/` overall: the symlink branches plus `local.py`'s
+    model-calling lines, both covered only outside the default run).

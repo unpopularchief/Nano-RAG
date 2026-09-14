@@ -22,6 +22,7 @@ from typing import Any
 import numpy as np
 
 from nanorag.errors import IndexModelMismatch, StoreError
+from nanorag.store.filters import Filter, compile_filter
 from nanorag.types import Chunk, Document
 
 _SCHEMA = """
@@ -63,6 +64,9 @@ CREATE TABLE IF NOT EXISTS meta (
 
 _MODEL_ID_KEY = "embedding_model_id"
 _DIM_KEY = "embedding_dim"
+
+#: Chunk ids per ``IN (...)`` query in :meth:`SqliteDocumentStore.get_chunks_by_ids`.
+_IN_BATCH = 500
 
 
 def _now() -> str:
@@ -259,6 +263,56 @@ class SqliteDocumentStore:
         )
         for row in cursor:
             yield _row_to_chunk(row)
+
+    def get_chunks_by_ids(self, chunk_ids: Sequence[str]) -> dict[str, Chunk]:
+        """Return the stored chunks among *chunk_ids*, keyed by id.
+
+        Ids that are not stored are simply absent from the result. This is
+        how a retriever turns a vector store's ``(chunk_id, score)`` hits
+        back into ``Chunk`` objects.
+        """
+        found: dict[str, Chunk] = {}
+        # Stay well under SQLite's bound-parameter limit for a large k.
+        for start in range(0, len(chunk_ids), _IN_BATCH):
+            batch = list(chunk_ids[start : start + _IN_BATCH])
+            placeholders = ", ".join("?" for _ in batch)
+            cursor = self._conn.execute(
+                "SELECT chunk_id, doc_id, ordinal, text, start_char, end_char, "
+                f"token_count, metadata FROM chunks WHERE chunk_id IN ({placeholders})",
+                batch,
+            )
+            for row in cursor:
+                chunk = _row_to_chunk(row)
+                found[chunk.chunk_id] = chunk
+        return found
+
+    def filter_chunk_ids(self, filter: Filter) -> set[str]:
+        """Return the ids of every chunk matching *filter*.
+
+        The metadata **pre**-filter (plan.md §6): the result is handed to
+        ``NumpyVectorStore.search(allowed_ids=...)`` so the top-*k* is taken
+        over matching chunks only. A filter that matches nothing returns an
+        empty set — not an error.
+
+        Parameters
+        ----------
+        filter
+            A mapping in the :mod:`nanorag.store.filters` grammar.
+
+        Raises
+        ------
+        RetrievalError
+            *filter* is not in the grammar.
+
+        """
+        where, params = compile_filter(filter)
+        cursor = self._conn.execute(
+            "SELECT chunks.chunk_id FROM chunks "
+            "JOIN documents ON documents.doc_id = chunks.doc_id "
+            f"WHERE {where}",
+            params,
+        )
+        return {row[0] for row in cursor}
 
     # -- embeddings ----------------------------------------------------------
 

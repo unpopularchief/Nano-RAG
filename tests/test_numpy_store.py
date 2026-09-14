@@ -172,3 +172,72 @@ def test_search_allowed_ids_survives_compact():
     store.compact()
     results = store.search(_unit([1, 0]), k=5, allowed_ids={"b", "does-not-exist"})
     assert [chunk_id for chunk_id, _ in results] == ["b"]
+
+
+# --- deterministic tie-breaking (Phase C1) ----------------------------------
+
+
+def test_ties_are_broken_by_chunk_id_not_insertion_order():
+    same = _unit([1, 0])
+    first = NumpyVectorStore(dim=2)
+    first.upsert(["c", "a", "b"], np.stack([same, same, same]))
+    second = NumpyVectorStore(dim=2)
+    second.upsert(["b", "c", "a"], np.stack([same, same, same]))
+
+    expected = [
+        ("a", pytest.approx(1.0)),
+        ("b", pytest.approx(1.0)),
+        ("c", pytest.approx(1.0)),
+    ]
+    assert first.search(same, k=3) == expected
+    assert second.search(same, k=3) == expected
+
+
+def test_ties_at_the_k_boundary_are_cut_by_chunk_id():
+    # Five identical vectors, k=2: the two smallest ids win, whatever the
+    # partition step happened to put at the boundary.
+    same = _unit([0, 1])
+    store = NumpyVectorStore(dim=2)
+    store.upsert(["e", "d", "c", "b", "a"], np.stack([same] * 5))
+    assert [cid for cid, _ in store.search(same, k=2)] == ["a", "b"]
+
+
+def test_score_still_outranks_id_order():
+    store = NumpyVectorStore(dim=2)
+    store.upsert(["a", "b"], np.stack([_unit([1, 1]), _unit([1, 0])]))
+    assert [cid for cid, _ in store.search(_unit([1, 0]), k=2)] == ["b", "a"]
+
+
+def test_tie_break_survives_compact_and_delete():
+    same = _unit([1, 0])
+    store = NumpyVectorStore(dim=2)
+    store.upsert(["z", "y", "x", "w"], np.stack([same] * 4))
+    store.delete(["x"])
+    store.compact()
+    assert [cid for cid, _ in store.search(same, k=10)] == ["w", "y", "z"]
+
+
+@pytest.mark.parametrize("allowed_count", [1, 4, 5, 6, 19, 20])
+def test_gather_and_in_place_scoring_paths_agree_with_brute_force(allowed_count):
+    # search() gathers candidate rows below _GATHER_FRACTION of the index
+    # and scores the whole matrix in place above it; both must give exactly
+    # the brute-force answer on either side of the threshold (20 rows ->
+    # threshold at 5).
+    rng = np.random.default_rng(7)
+    n, dim = 20, 8
+    matrix = rng.standard_normal((n, dim)).astype(np.float32)
+    matrix /= np.linalg.norm(matrix, axis=1, keepdims=True)
+    ids = [f"id{i:02d}" for i in range(n)]
+    store = NumpyVectorStore(dim=dim)
+    store.upsert(ids, matrix)
+    query = matrix[3]
+    allowed = set(ids[:allowed_count])
+
+    scores = matrix @ query
+    expected = sorted(
+        ((ids[i], float(scores[i])) for i in range(n) if ids[i] in allowed),
+        key=lambda r: (-r[1], r[0]),
+    )[:3]
+    got = store.search(query, k=3, allowed_ids=allowed)
+    assert [cid for cid, _ in got] == [cid for cid, _ in expected]
+    assert [s for _, s in got] == pytest.approx([s for _, s in expected], abs=1e-6)
