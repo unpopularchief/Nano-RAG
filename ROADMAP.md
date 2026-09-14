@@ -9,7 +9,7 @@ contiguous release list.
 | --- | --- | --- | --- |
 | **A — Foundation** | `v0.0.1` | Repo installs, lints, type-checks, tests, builds a wheel on Linux + Windows. Core data types. | **done; Gate A passed** |
 | **B — Corpus to index** | `v0.0.4` | Real files → durable, searchable vectors. Fully offline. | **done; Gate B passed** |
-| **C — First answers (MVP)** | `v0.1.0` | Documents in, cited answer out — free key or fully offline. First public release. | **in progress — C1 done** |
+| **C — First answers (MVP)** | `v0.1.0` | Documents in, cited answer out — free key or fully offline. First public release. | **in progress — C1, C2 done** |
 | **D — Trust** | `v0.3.0` | Citations resolving to text spans, a CLI, quality as numbers in CI (≥ 200-item eval set). | not started |
 | **E — Durability** | `v0.4.0` | Re-ingesting a changed corpus is correct and cheap. | not started |
 | **F — Quality** | `v0.6.0` | Beat the Phase D baseline with evidence — reranking, BM25/hybrid, MMR. Negative results published. | not started |
@@ -88,8 +88,25 @@ contiguous release list.
   brute-force NumPy reference exactly, filtered and unfiltered; a filter
   matching nothing returns `[]`, not an error; a test proves post-filtering
   silently loses results.
-- **C2** — `context/builder.py`, `prompting/templates.py` + `fencing.py`.
-  Not started.
+- **C2** ✅ — `context/builder.py`, `prompting/templates.py` + `fencing.py`.
+  `ContextBuilder(budget_tokens, counter=)` takes hits in rank order, drops
+  repeated chunk ids / repeated normalised texts / empty chunks, and takes
+  blocks in order until the first one that does not fit — so the context is
+  always a rank-order prefix (no holes), a chunk is never split, and
+  `Context.truncated` records any drop. The budget is checked on the
+  rendered, joined text under the real counter, not a per-block sum, so it
+  holds for tokenizers that merge across block boundaries. Returns the
+  blocks and the `chunk_id -> label` map. `PromptBuilder` assembles the
+  system prompt (an instruction hierarchy: fenced text is data, answer only
+  from it, cite `[n]`, abstain with a fixed `INSUFFICIENT_CONTEXT_TEXT`) and
+  a user message of the context inside a per-request nonce fence followed
+  by the question. `make_nonce(avoid=)` never returns a value present in
+  the fenced text or the question, and `fence()` refuses a body containing
+  its nonce, so a closing fence is unforgeable from inside. Checkpoint met:
+  a 500-example Hypothesis test with adversarial chunk sizes (empty,
+  whitespace-only, one character, far over budget, duplicates) and four
+  counters including super- and sub-additive ones asserts the context
+  never exceeds the budget.
 - **C3** — `ratelimit.py`, `generation/`, `pipeline.py`,
   `observability/timing.py`, `benchmarks/`, first `examples/`. Not started.
 - **🚦 Gate C** — the MVP; decision checklist in `plan.md` §9.

@@ -4,17 +4,21 @@ A small, readable, production-capable retrieval-augmented generation **engine**
 — not a framework. The goal is that you can read the whole thing in an
 afternoon, run it against your own documents, and operate it for free.
 
-> **Status: Phase C in progress (C1 done).** The package installs, lints,
+> **Status: Phase C in progress (C1, C2 done).** The package installs, lints,
 > type-checks, tests and builds a wheel on Linux and Windows. It loads real
 > files (`loaders/`), cleans and chunks them (`cleaning/`, `chunking/`), turns
 > the chunks into vectors locally (`embeddings/` — `FastEmbedEmbedder` via
 > `fastembed`/ONNX, no torch, with a persistent cache and batching), persists
 > both text and vectors (`store/` — `SqliteDocumentStore`, `NumpyVectorStore`)
-> — all fully offline after the first model download, no keys — and now
-> retrieves: `retrieval.DenseRetriever` returns exact top-*k* cosine hits,
-> ties broken deterministically, with a metadata **pre**-filter grammar
-> (`store/filters.py`) that compiles to bound-parameter SQL. There is no
-> context building, prompting or generation code yet. See
+> — all fully offline after the first model download, no keys — retrieves
+> (`retrieval.DenseRetriever`: exact top-*k* cosine hits, ties broken
+> deterministically, with a metadata **pre**-filter grammar in
+> `store/filters.py` that compiles to bound-parameter SQL), and now builds
+> the prompt: `context.ContextBuilder` fits ranked chunks into a token
+> budget as `[n]`-labelled blocks (deduplicated, never over budget —
+> property-tested), and `prompting.PromptBuilder` wraps them in a
+> per-request nonce fence under an instruction-hierarchy system prompt.
+> There is no generation, rate limiting or pipeline code yet. See
 > [`plan.md`](plan.md) §9 for the phased roadmap and [`ROADMAP.md`](ROADMAP.md)
 > for the condensed version.
 

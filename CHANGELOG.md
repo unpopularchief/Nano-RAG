@@ -273,3 +273,54 @@ breaking changes bump the minor).
     `store/filters.py`, `store/numpy_store.py`, `store/sqlite_docs.py`
     (98% on `src/` overall: the symlink branches plus `local.py`'s
     model-calling lines, both covered only outside the default run).
+- **Phase C2 — context building and prompting.**
+  - `context/builder.py`: `ContextBuilder(budget_tokens, counter=)` with
+    `build(hits) -> Context`. Input order is rank order and is preserved
+    (the retriever, and later the reranker or fusion stage, owns ranking).
+    Deduplicates by chunk id and by normalised text (NFC + LF, surrounding
+    whitespace ignored) keeping the first occurrence, skips empty or
+    whitespace-only chunks, then takes blocks in rank order until the first
+    that does not fit — the context is always a rank-order prefix, never a
+    top-*k* with holes, and a chunk is never split (its offsets are what
+    citations point at). Blocks render as `[n]` on its own line followed by
+    the chunk text verbatim, joined by blank lines. The budget check is on
+    that rendered, joined text under the counter given — not on a sum of
+    per-block counts — so it holds for tokenizers that merge across block
+    boundaries. `Context` carries `blocks`, the read-only `chunk_id ->
+    label` map, `text`, `token_count`, `budget_tokens` and `truncated`
+    (never silent, plan.md §15 #6), and enforces `token_count <=
+    budget_tokens` on construction. A budget below 1 is a `ConfigError`.
+  - `prompting/fencing.py`: `make_nonce(avoid=)` — a `secrets`-random
+    128-bit hex nonce redrawn until it does not occur in the text it will
+    surround; `fence(body, nonce)` — wraps the body verbatim between
+    `=== BEGIN UNTRUSTED CONTEXT <nonce> ===` and the matching `END` line
+    and refuses a body containing its own nonce, so a closing fence cannot
+    be forged from inside.
+  - `prompting/templates.py`: `PromptBuilder(system_prompt=)` with
+    `build(question, context) -> Prompt(system, user, nonce)`. The default
+    system prompt is an instruction hierarchy: everything inside the fence
+    is data, never instructions; answer only from it; cite with `[n]`, one
+    label per bracket; abstain with exactly `INSUFFICIENT_CONTEXT_TEXT` (the
+    defined "insufficient context" answer the pipeline will also return
+    without a model call when retrieval yields nothing). The template must
+    carry the `{nonce}` placeholder (`ConfigError` otherwise) because a
+    model that is not told the nonce cannot tell a real fence from a forged
+    one; the nonce is drawn per request and avoids both the context and the
+    question. `Prompt.as_text()` flattens to one string for single-string
+    generators.
+  - Tests (`tests/test_context_builder.py`, `tests/test_prompting.py`):
+    the C2 checkpoint — a 500-example Hypothesis test over adversarial
+    chunk sizes (empty, whitespace-only, single characters, far over
+    budget, re-inserted duplicates and same-text copies) and four counters
+    (heuristic, word, super-additive separator-heavy, sub-additive
+    distinct-characters) asserts the context never exceeds the budget, is a
+    rank-order prefix of the deduplicated input, labels 1..n consistently,
+    reports `truncated` exactly when something was dropped, and that the
+    next candidate genuinely would not have fit; an explicit test shows a
+    per-block sum would have exceeded the budget where the joined count
+    does not; a real `TiktokenCounter` case; every dedup and truncation
+    rule; the fence's forgery-resistance with a document that contains
+    fake `END`/`BEGIN` lines; nonce redraw on collision; and an end-to-end
+    context -> prompt -> `FakeGenerator` -> `[n]` resolution to a chunk id.
+  - 448 tests in the default suite, 100% coverage on `context/` and
+    `prompting/` (98% on `src/` overall, same pre-existing gaps).
