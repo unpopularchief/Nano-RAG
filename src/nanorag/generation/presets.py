@@ -55,20 +55,28 @@ class Preset:
             raise ConfigError(f"context_window must be >= 1, got {self.context_window}")
 
 
+#: ``llama-3.3-70b-versatile`` was gone from ``GET /v1/models`` entirely by
+#: the Gate C check (2026-09-15, live key) — Groq retires names often, which
+#: is why F6 exists. ``openai/gpt-oss-120b`` is Groq's current largest
+#: general chat model (131 072 context, ``active: true``).
 GROQ = Preset(
     name="groq",
     base_url="https://api.groq.com/openai/v1",
     api_key_env="GROQ_API_KEY",
-    default_model="llama-3.3-70b-versatile",
+    default_model="openai/gpt-oss-120b",
     context_window=131_072,
 )
 
+#: OpenRouter's free pool rotates: ``meta-llama/llama-3.3-70b-instruct:free``
+#: was gone by the Gate C check (2026-09-15). A retired name surfaces as
+#: ``ProviderError`` (``model_not_found``) and falls through the chain
+#: (plan.md §18 F6); pass ``model=`` when this one goes too.
 OPENROUTER = Preset(
     name="openrouter",
     base_url="https://openrouter.ai/api/v1",
     api_key_env="OPENROUTER_API_KEY",
-    default_model="meta-llama/llama-3.3-70b-instruct:free",
-    context_window=131_072,
+    default_model="google/gemma-4-31b-it:free",
+    context_window=262_144,
 )
 
 OLLAMA = Preset(

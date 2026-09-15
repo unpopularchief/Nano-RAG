@@ -2,13 +2,12 @@
 
 ``Document``, ``Chunk`` and ``ScoredChunk`` are the stable spine of the
 library. ``Answer``, ``Citation``, ``Usage`` and ``Timings`` are the query
-path's output types: they are defined here so the read path can be built
-against them, but they stay **explicitly unstable until Gate C** — the field
-set is locked at ``v0.1.0`` against a working pipeline, not one phase ahead of
-it (plan.md §18 F11). ``IngestReport`` and ``LoadIssue`` are the write path's
-counterpart, introduced in Phase B; they carry the same "unstable until
-proven against a working path" caveat, informally, since deletion/update
-semantics (Phase E) will add fields.
+path's output types, **frozen at Gate C / ``v0.1.0``** against the working
+read path rather than one phase ahead of it (plan.md §18 F11): from here
+on, a field change is a breaking change. ``IngestReport`` and ``LoadIssue``
+are the write path's counterpart, introduced in Phase B; they stay
+informally unstable, since deletion/update semantics (Phase E) will add
+fields.
 
 Metadata is a flat ``str -> JSON scalar`` mapping. Nesting is rejected: it
 breaks the filter grammar's compilation to bound SQL parameters and buys
@@ -213,7 +212,8 @@ class ScoredChunk:
 class Citation:
     """A resolved ``[n]`` marker linking answer text back to a source span.
 
-    Unstable until Gate C.
+    Stable since ``v0.1.0``. Populated from Phase D (citation resolution);
+    ``Answer.citations`` is empty until then.
 
     Attributes
     ----------
@@ -263,7 +263,7 @@ class Citation:
 class Usage:
     """Token, cost and provider accounting for one query.
 
-    Unstable until Gate C.
+    Stable since ``v0.1.0``.
 
     Attributes
     ----------
@@ -313,8 +313,10 @@ class Usage:
 class Timings:
     """Wall-clock milliseconds spent in each pipeline stage.
 
-    Unstable until Gate C — the stage set may change as the read path settles.
-    All fields default to ``0.0`` so a partial pipeline is easy to record.
+    Stable since ``v0.1.0``. All fields default to ``0.0`` so a partial
+    pipeline is easy to record; a stage the pipeline does not run yet
+    (``rerank_ms`` until Phase F) or does not separate out (``embed_ms`` —
+    the query embedding is inside ``retrieve_ms``) reads ``0.0``.
     """
 
     embed_ms: float = 0.0
@@ -340,8 +342,7 @@ class Timings:
 class Answer:
     """The result of a query: text, the chunks behind it, and accounting.
 
-    **Unstable until Gate C** (plan.md §18 F11) — becomes public and frozen at
-    ``v0.1.0``.
+    **Stable since ``v0.1.0``** (frozen at Gate C, plan.md §18 F11).
 
     Attributes
     ----------
@@ -352,8 +353,12 @@ class Answer:
     contexts
         Exactly the scored chunks that were placed in the prompt.
     insufficient_context
-        Retrieval fell below the score/count floor; the model was instructed
-        to abstain. A caller never has to parse ``text`` to learn this.
+        Retrieval fell below the count/score floor
+        (``nanorag.pipeline.insufficient_context``). With no usable context
+        the pipeline never called the model and ``text`` is the fixed
+        abstention; with thin context the model was still asked, under a
+        prompt that tells it to abstain. Either way a caller never has to
+        parse ``text`` to learn this.
     truncated
         One or more context blocks were dropped to fit the token budget.
     usage

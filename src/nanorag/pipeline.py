@@ -68,6 +68,12 @@ DEFAULT_K = 8
 DEFAULT_BUDGET_MARGIN = 0.15
 #: ``Usage.provider`` on an answer that never reached a generator.
 NO_PROVIDER = "none"
+#: :func:`insufficient_context` floor that ``from_defaults()`` applies for the
+#: default embedder, ``bge-base-en-v1.5`` — measured at Gate C (unrelated
+#: questions topped out at 0.60, answerable ones started at 0.61; see the
+#: function docstring). Meaningless for any other embedder, so ``Rag()``
+#: itself defaults to no floor.
+DEFAULT_MIN_SCORE = 0.55
 
 _EMPTY_CONTEXT = Context(
     blocks=(), labels={}, text="", token_count=0, budget_tokens=1, truncated=False
@@ -108,22 +114,44 @@ def insufficient_context(
     *,
     min_results: int = 1,
     min_gap: float = 0.0,
+    min_score: float | None = None,
 ) -> bool:
     """Return True when retrieval found nothing worth answering from.
 
-    Calibration-free by design (plan.md §18 F10): cosine scores are not
-    comparable across corpora or models, so there is no fixed floor. Two
-    checks, either of which flags the query:
+    A tunable heuristic, not a guarantee (plan.md §18 F10). Three checks,
+    any of which flags the query; the last two are off by default:
 
     - fewer than *min_results* hits;
-    - with two or more hits, the top score stands out from the mean of the
-      rest by less than *min_gap* — nothing was clearly a match.
+    - *min_score*: the top score is below this absolute floor;
+    - *min_gap*: with two or more hits, the top score stands out from the
+      mean of the rest by less than this — nothing was clearly a match.
 
-    ``min_gap=0.0`` (the default) disables the gap check, leaving only the
-    count floor; the threshold is a tunable heuristic to be set against a
-    real corpus at Gate C, not a guarantee.
+    **Locked at Gate C by measurement** (``bge-base-en-v1.5``, two corpora
+    of ~120 chunks, 33 answerable vs 32 unrelated questions, ``k=8``):
+
+    - The relative gap (top-1 − mean of the rest) does **not** separate.
+      Answerable questions on a corpus that covers their topic densely
+      have many near-equal hits (gap median 0.05–0.07, min 0.005);
+      unrelated questions score uniformly low with the same small gap
+      (median 0.015, max 0.04). Any threshold that catches most unrelated
+      questions abstains on 20–40 % of answerable ones. So ``min_gap``
+      ships disabled and stays available for corpora where it does help.
+    - The absolute top-1 score does separate, but on a scale that is the
+      embedder's, not a constant: with ``bge-base-en-v1.5`` every
+      answerable question scored ≥ 0.61 and every unrelated one ≤ 0.60
+      (median 0.48); on-topic-but-uncovered questions land in 0.55–0.71,
+      which is the model's job to abstain on, not retrieval's. ``min_score``
+      ships disabled because ``Rag`` takes any embedder; **0.55 is the
+      measured setting for the default embedder** and is the one
+      ``from_defaults()`` uses (see :data:`DEFAULT_MIN_SCORE`).
+
+    ``Rag.query()`` reports the outcome on ``Answer.insufficient_context``
+    and still asks the model, which the prompt instructs to abstain; only
+    an empty context skips the call.
     """
     if len(hits) < min_results:
+        return True
+    if min_score is not None and hits and hits[0].score < min_score:
         return True
     if min_gap > 0 and len(hits) >= 2:
         rest = [h.score for h in hits[1:]]
@@ -260,8 +288,11 @@ class Rag:
         Chunks retrieved per query.
     budget_margin
         Safety fraction taken off the context budget.
-    min_results, min_gap
-        :func:`insufficient_context` thresholds.
+    min_results, min_gap, min_score
+        :func:`insufficient_context` thresholds. ``min_score`` is on the
+        embedder's own score scale, so it defaults to off here;
+        :meth:`from_defaults` sets :data:`DEFAULT_MIN_SCORE` for the
+        default embedder.
 
     Raises
     ------
@@ -285,6 +316,7 @@ class Rag:
         budget_margin: float = DEFAULT_BUDGET_MARGIN,
         min_results: int = 1,
         min_gap: float = 0.0,
+        min_score: float | None = None,
     ) -> None:
         """Wire the components together (see the class docstring)."""
         meta = docs.index_meta()
@@ -314,6 +346,7 @@ class Rag:
         self.budget_margin = budget_margin
         self.min_results = min_results
         self.min_gap = min_gap
+        self.min_score = min_score
 
     @classmethod
     def from_defaults(
@@ -338,6 +371,8 @@ class Rag:
             Skip :func:`default_generator` and use this one.
         **kwargs
             Passed through to ``Rag(...)`` (``k``, ``counter``, …).
+            ``min_score`` defaults to :data:`DEFAULT_MIN_SCORE` when the
+            embedding model is the default one, else stays off.
 
         Raises
         ------
@@ -348,13 +383,15 @@ class Rag:
         """
         from nanorag.embeddings.batching import BatchingEmbedder
         from nanorag.embeddings.cache import CachingEmbedder, EmbeddingCache
-        from nanorag.embeddings.local import FastEmbedEmbedder
+        from nanorag.embeddings.local import DEFAULT_MODEL_ID, FastEmbedEmbedder
 
         if settings is None:
             settings = Settings.load()
         root = Path(persist_dir if persist_dir is not None else settings.persist_dir)
         root.mkdir(parents=True, exist_ok=True)
         local = FastEmbedEmbedder(settings.embedding_model)
+        if settings.embedding_model == DEFAULT_MODEL_ID:
+            kwargs.setdefault("min_score", DEFAULT_MIN_SCORE)
         embedder = CachingEmbedder(
             BatchingEmbedder(local, batch_size=settings.embed_batch_size),
             EmbeddingCache(root / "embeddings.sqlite"),
@@ -444,7 +481,10 @@ class Rag:
             )
             context = ContextBuilder(budget, counter=self.counter).build(hits)
             thin = insufficient_context(
-                hits, min_results=self.min_results, min_gap=self.min_gap
+                hits,
+                min_results=self.min_results,
+                min_gap=self.min_gap,
+                min_score=self.min_score,
             )
 
         if not context.blocks:

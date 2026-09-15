@@ -38,7 +38,7 @@ second client for Gemini's own schema.
 
 | Role | Choice | Free tier | Data-usage terms |
 | --- | --- | --- | --- |
-| **Primary** | Groq — `llama-3.3-70b-versatile`, `openai/gpt-oss-120b` | ~30 RPM, ~1K req/day, no card. Returns `Retry-After` on 429. | See Groq's current terms. |
+| **Primary** | Groq — `openai/gpt-oss-120b` | ~30 RPM, ~1K req/day, no card. Returns `Retry-After` on 429. | See Groq's current terms. |
 | **Fallback** | Gemini Flash | Generous free tier. Used when Groq's daily cap is hit. | **Google's free tier may train on submitted prompts.** Paid does not. |
 | **Offline** | Ollama — `qwen2.5:7b-instruct` or `llama3.1:8b` | Local, unlimited. Q4_K_M ≈ 4.7 GB weights + ~2 GB KV → fits 8 GB VRAM at 8–16k context. | Nothing leaves the machine. **The fully-private path.** |
 | **Rerank** (Phase F) | Jina `jina-reranker-v2-base-multilingual`, or a local ONNX cross-encoder | 1M tokens free, 100 RPM. | **Non-commercial key.** The local cross-encoder keeps the pipeline offline. |
@@ -70,6 +70,19 @@ the typed errors in `nanorag.errors`:
 | 404 / `model_not_found` (a retired model name) | `ProviderError` tagged `code="model_not_found"` | no — straight to the fallback |
 | 5xx, timeout, connection failure | `TransientError` | yes, bounded exponential backoff with jitter |
 | any other 4xx | `ProviderError` | no |
+
+Preset default models are checked against a live key/catalogue at each
+gate, not just the models list — `GET /models` can still list a name the
+generation endpoint 404s on. At Gate C (2026-09-15), against real keys:
+Groq's `llama-3.3-70b-versatile` was gone from `GET /v1/models` entirely
+→ `openai/gpt-oss-120b`. Gemini's `gemini-2.5-flash` still appeared in
+`GET /v1beta/models` but 404'd on `generateContent` ("no longer available
+to new users") → `gemini-3.6-flash`, the model Google's own error message
+named as the replacement. OpenRouter's
+`meta-llama/llama-3.3-70b-instruct:free` was gone from its catalogue too →
+`google/gemma-4-31b-it:free`. **All three free tiers rotate their model
+names**, which is exactly the F6 fallback path this exercises — a retired
+name becomes a hand-off, and `model=` overrides any preset.
 
 `ratelimit.RateLimiter(rpm=, tpm=, rpd=)` can be handed to a client to keep
 under a tier's caps proactively; the retry loop pushes every `Retry-After`

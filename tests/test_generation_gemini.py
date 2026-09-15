@@ -21,6 +21,7 @@ from nanorag.generation import (
     looks_like_daily_quota,
     retry_after_seconds,
 )
+from nanorag.generation.gemini import DEFAULT_MODEL
 from nanorag.prompting.templates import Prompt
 from nanorag.ratelimit import Backoff
 
@@ -41,7 +42,7 @@ GEMINI_OK = {
         "candidatesTokenCount": 6,
         "totalTokenCount": 39,
     },
-    "modelVersion": "gemini-2.5-flash",
+    "modelVersion": DEFAULT_MODEL,
 }
 GEMINI_429_RPM = {
     "error": {
@@ -111,7 +112,7 @@ def test_key_comes_from_gemini_api_key(monkeypatch):
 def test_defaults_and_repr_without_key():
     gen, _ = _gen((200, GEMINI_OK, None))
     assert gen.provider == "gemini"
-    assert gen.model == "gemini-2.5-flash"
+    assert gen.model == DEFAULT_MODEL
     assert gen.context_window == 1_048_576
     assert gen.max_output_tokens == 1024
     assert "AIza-secret" not in repr(gen)
@@ -128,7 +129,7 @@ def test_sends_system_instruction_and_user_content_and_joins_parts():
 
     assert out.text == "The cat sat. [1]"
     assert out.usage.provider == "gemini"
-    assert out.usage.model == "gemini-2.5-flash"
+    assert out.usage.model == DEFAULT_MODEL
     assert (out.usage.prompt_tokens, out.usage.completion_tokens) == (33, 6)
     assert out.usage.total_tokens == 39
 
@@ -136,7 +137,7 @@ def test_sends_system_instruction_and_user_content_and_joins_parts():
     assert request.method == "POST"
     assert str(request.url) == (
         "https://generativelanguage.googleapis.com/v1beta/models/"
-        "gemini-2.5-flash:generateContent"
+        f"{DEFAULT_MODEL}:generateContent"
     )
     assert request.headers["x-goog-api-key"] == "AIza-secret"
     body = json.loads(request.content)
@@ -151,7 +152,7 @@ def test_missing_usage_metadata_is_tolerated():
     out = gen.generate(PROMPT)
     assert out.text == "x"
     assert out.usage.total_tokens == 0
-    assert out.usage.model == "gemini-2.5-flash"
+    assert out.usage.model == DEFAULT_MODEL
 
 
 @pytest.mark.parametrize("body", [{"candidates": []}, {"promptFeedback": {}}])

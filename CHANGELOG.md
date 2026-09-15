@@ -7,6 +7,48 @@ breaking changes bump the minor).
 
 ## [Unreleased]
 
+## [0.1.0] — 2026-09-15
+
+The MVP: documents in, cited answer out, on a free key or fully offline.
+First public release; everything below was built towards it.
+
+### Gate C — decisions locked against the working read path
+
+- **`Answer`, `Citation`, `Usage`, `Timings` are frozen** (plan.md §18
+  F11). Fields as shipped in C3, unchanged: `Answer(text, citations,
+  contexts, insufficient_context, truncated, usage, timings)`. A field
+  change is now a breaking change.
+- **`from_defaults()` auto-chains every available generator** — confirmed
+  as implemented (Groq → Gemini → Ollama). Fallback is opt-out by naming a
+  `generator_preset`, not opt-in.
+- **Abstention heuristic locked by measurement** (plan.md §18 F10).
+  Measured with the real `bge-base-en-v1.5` on two ~120-chunk corpora
+  (the project's own docs; nine unrelated package READMEs), 33 answerable
+  vs 32 unrelated questions, `k=8`. The relative top-1-vs-rest gap does not
+  separate (answerable median 0.05–0.07 with a 0.005 floor; unrelated
+  median 0.015, max 0.04) — `min_gap` stays off by default. The absolute
+  top-1 score does (answerable ≥ 0.61, unrelated ≤ 0.60): new
+  `insufficient_context(min_score=)` / `Rag(min_score=)` floor, off in
+  `Rag()` because the scale is the embedder's, set to
+  `DEFAULT_MIN_SCORE = 0.55` by `from_defaults()` for the default embedder
+  only. Documented as tunable, not a guarantee.
+- **F1–F4 confirmed in place**: single-process scope stated (README
+  Limits, `docs/conventions.md`); writer lock + snapshot reads + SQLite-
+  before-matrix ordering in `store/numpy_store.py` and `pipeline.py`; the
+  ≥ 200-item eval set is a Phase D deliverable; token counting takes the
+  15 % margin + `usage` reconciliation route with no `tokenizers`
+  dependency.
+- **Preset defaults verified against real keys, not just the models
+  list** (a listed model can still 404 on generation): Groq's
+  `llama-3.3-70b-versatile` was gone from `GET /v1/models` entirely →
+  `openai/gpt-oss-120b`; Gemini's `gemini-2.5-flash` still listed but
+  404'd on `generateContent` ("no longer available to new users") →
+  `gemini-3.6-flash` (the model Google's own error names as the
+  replacement); OpenRouter's `meta-llama/llama-3.3-70b-instruct:free` gone
+  from its catalogue → `google/gemma-4-31b-it:free` (262k window). All
+  three free tiers rotate names — exactly what F6's fallback exists for.
+- Version `0.1.0`; classifier `Development Status :: 3 - Alpha`.
+
 ### Added
 
 - **Phase A1 — scaffolding.** `git init`, MIT `LICENSE`, `.gitignore`,
@@ -33,7 +75,7 @@ breaking changes bump the minor).
     `PYTHONHASHSEED`.
   - `types.py`: frozen, slotted, validated dataclasses — `Document`, `Chunk`,
     `ScoredChunk` (stable spine) plus `Citation`, `Usage`, `Timings`, `Answer`
-    (explicitly unstable until Gate C, per plan.md §18 F11). Flat
+    (unstable until Gate C, per plan.md §18 F11 — frozen at `0.1.0`). Flat
     `str -> JSON scalar` metadata, copied into a read-only mapping on
     construction. `to_dict()` on every type for the future CLI.
   - Tests: hash determinism verified in subprocesses under two
@@ -325,7 +367,7 @@ breaking changes bump the minor).
   - 448 tests in the default suite, 100% coverage on `context/` and
     `prompting/` (98% on `src/` overall, same pre-existing gaps).
 - **Phase C3 — generation, rate limiting, the pipeline. Phase C is now
-  feature-complete; Gate C review pending.**
+  feature-complete.**
   - `ratelimit.py`: `RateLimiter(rpm=, tpm=, rpd=)` — one token bucket per
     cap, refilled evenly, plus `hold(seconds)` for a provider's
     `Retry-After`; `acquire(tokens)` sleeps (injectable) until admitted and
@@ -392,7 +434,7 @@ breaking changes bump the minor).
     they exceed the margin (plan.md §18 F4). `context_budget(window,
     max_output, overhead, margin=)`, `insufficient_context(hits,
     min_results=, min_gap=)` (F10's relative signal; the gap check is
-    opt-in until calibrated at Gate C) and `load_vectors(docs, dim)` are
+    opt-in, calibrated at Gate C — see above) and `load_vectors(docs, dim)` are
     module-level. `Rag.from_defaults(persist_dir)` — `FastEmbedEmbedder`
     wrapped in `BatchingEmbedder` + `CachingEmbedder` (`embeddings.sqlite`),
     `SqliteDocumentStore` (`nanorag.sqlite`), and `default_generator()`:

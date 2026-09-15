@@ -61,7 +61,7 @@ GROQ_404_MODEL = {
 }
 
 
-def _ok(text="Answer [1]", model="llama-3.3-70b-versatile"):
+def _ok(text="Answer [1]", model=GROQ.default_model):
     return {
         "id": "chatcmpl-x",
         "model": model,
@@ -122,7 +122,7 @@ def test_defaults_come_from_the_preset_and_are_overridable():
     gen, _ = _gen((200, _ok(), None))
     assert (gen.provider, gen.model, gen.context_window) == (
         "groq",
-        "llama-3.3-70b-versatile",
+        GROQ.default_model,
         131_072,
     )
     gen2, _ = _gen((200, _ok(), None), model="other", context_window=8192)
@@ -160,7 +160,7 @@ def test_sends_system_and_user_messages_and_parses_usage():
 
     assert out.text == "The cat sat. [1]"
     assert out.usage.provider == "groq"
-    assert out.usage.model == "llama-3.3-70b-versatile"
+    assert out.usage.model == GROQ.default_model
     assert (out.usage.prompt_tokens, out.usage.completion_tokens) == (40, 5)
     assert out.usage.total_tokens == 45
 
@@ -173,7 +173,7 @@ def test_sends_system_and_user_messages_and_parses_usage():
         {"role": "system", "content": PROMPT.system},
         {"role": "user", "content": PROMPT.user},
     ]
-    assert body["model"] == "llama-3.3-70b-versatile"
+    assert body["model"] == GROQ.default_model
     assert body["max_tokens"] == 77
     assert body["temperature"] == 0.0
 

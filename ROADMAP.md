@@ -9,7 +9,7 @@ contiguous release list.
 | --- | --- | --- | --- |
 | **A — Foundation** | `v0.0.1` | Repo installs, lints, type-checks, tests, builds a wheel on Linux + Windows. Core data types. | **done; Gate A passed** |
 | **B — Corpus to index** | `v0.0.4` | Real files → durable, searchable vectors. Fully offline. | **done; Gate B passed** |
-| **C — First answers (MVP)** | `v0.1.0` | Documents in, cited answer out — free key or fully offline. First public release. | **feature-complete (C1–C3); Gate C review pending** |
+| **C — First answers (MVP)** | `v0.1.0` | Documents in, cited answer out — free key or fully offline. First public release. | **done — `v0.1.0`, Gate C passed** |
 | **D — Trust** | `v0.3.0` | Citations resolving to text spans, a CLI, quality as numbers in CI (≥ 200-item eval set). | not started |
 | **E — Durability** | `v0.4.0` | Re-ingesting a changed corpus is correct and cheap. | not started |
 | **F — Quality** | `v0.6.0` | Beat the Phase D baseline with evidence — reranking, BM25/hybrid, MMR. Negative results published. | not started |
@@ -142,13 +142,19 @@ contiguous release list.
   CI). Checkpoint: the README quickstart works with fakes in CI
   (`tests/test_examples.py`); the Groq and Ollama legs need a key / a local
   server and are part of the Gate C review, not the default suite.
-- **🚦 Gate C** — the MVP. **Pending.** Decision checklist in `plan.md` §9:
-  freeze `Answer`; confirm `from_defaults()` auto-chaining (implemented as
-  recommended); lock the `insufficient_context` thresholds against a real
-  corpus (`min_gap` ships disabled — only the count floor is active until
-  measured); confirm F1–F4 (F4 taken as the margin + `usage` reconciliation
-  route, no `tokenizers` dependency); the design-hold review on a real
-  corpus; and the three-way quickstart run (Groq key / Ollama / fakes).
+- **🚦 Gate C** ✅ — the MVP, `v0.1.0`. Decisions (plan.md §9 checklist),
+  each locked against the working read path: `Answer` / `Citation` /
+  `Usage` / `Timings` frozen as shipped in C3; `from_defaults()` keeps
+  auto-chaining every available generator; the abstention signal measured
+  with the real embedder on two corpora — the relative gap does not
+  separate answerable from unrelated questions, an absolute top-1 floor
+  does, so `min_gap` stays off, a `min_score` floor was added, and
+  `from_defaults()` sets `0.55` for `bge-base-en-v1.5` only; F1–F4
+  confirmed in place (F4 via the 15 % margin + `usage` reconciliation, no
+  `tokenizers` dependency); preset defaults checked against the live
+  catalogues (OpenRouter's had been retired and was replaced); the
+  three-way quickstart run — fakes in CI, plus the Groq and Ollama legs
+  recorded in the Gate C notes.
 
 ## Out of scope through 1.0
 

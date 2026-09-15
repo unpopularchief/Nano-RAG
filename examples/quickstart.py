@@ -15,6 +15,9 @@ import sys
 
 from nanorag import Rag
 
+# A real answer can hold characters Windows' cp1252 console can't encode.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 logging.basicConfig(level=logging.INFO, format="%(name)s: %(message)s")
 
 rag = Rag.from_defaults(persist_dir=".nanorag")

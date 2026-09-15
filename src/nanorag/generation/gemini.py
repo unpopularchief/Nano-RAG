@@ -47,7 +47,12 @@ from nanorag.types import Usage
 PROVIDER = "gemini"
 API_KEY_ENV = "GEMINI_API_KEY"
 BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
-DEFAULT_MODEL = "gemini-2.5-flash"
+#: ``gemini-2.5-flash`` still appears in ``GET /v1beta/models`` but 404s on
+#: generation for accounts created after its retirement ("no longer
+#: available to new users") — found live at Gate C (2026-09-15), not from
+#: the model list, which lags. ``gemini-3.6-flash`` is the model Google's
+#: own error message names as the replacement.
+DEFAULT_MODEL = "gemini-3.6-flash"
 DEFAULT_CONTEXT_WINDOW = 1_048_576
 DEFAULT_MAX_OUTPUT_TOKENS = 1024
 

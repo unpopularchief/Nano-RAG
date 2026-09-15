@@ -18,6 +18,7 @@ from nanorag.errors import ConfigError, IndexModelMismatch
 from nanorag.generation import FallbackGenerator, Generation
 from nanorag.hashing import content_hash, stable_doc_id
 from nanorag.pipeline import (
+    DEFAULT_MIN_SCORE,
     NO_PROVIDER,
     context_budget,
     default_generator,
@@ -115,6 +116,21 @@ def test_insufficient_context_count_floor_and_relative_gap():
     assert insufficient_context(_hits(0.80, 0.49, 0.49), min_gap=0.05) is False
     # A single hit cannot fail the gap check.
     assert insufficient_context(_hits(0.10), min_gap=0.5) is False
+
+
+def test_insufficient_context_absolute_floor():
+    # Off by default: the score scale belongs to the embedder.
+    assert insufficient_context(_hits(0.10)) is False
+    # On: judged on the top hit only — the rest may be anything.
+    assert insufficient_context(_hits(0.54, 0.10), min_score=0.55) is True
+    assert insufficient_context(_hits(0.55, 0.10), min_score=0.55) is False
+    # Independent of the other two checks: a clear gap does not rescue a
+    # top hit under the floor, and a floor-clearing hit still needs the gap.
+    assert insufficient_context(_hits(0.50, 0.10), min_score=0.55, min_gap=0.1) is True
+    assert insufficient_context(_hits(0.70, 0.69), min_score=0.55, min_gap=0.1) is True
+    assert insufficient_context(_hits(0.70, 0.10), min_score=0.55, min_gap=0.1) is False
+    # The count floor comes first: no hits is insufficient whatever the floor.
+    assert insufficient_context([], min_score=0.0) is True
 
 
 def test_load_vectors_rebuilds_the_index_from_sqlite():
@@ -298,6 +314,18 @@ def test_relative_signal_flags_a_flat_ranking_but_still_answers():
     assert len(generator.calls) == 1  # the model is told to abstain, not skipped
 
 
+def test_absolute_floor_flags_a_low_top_score_but_still_answers():
+    generator = FakeGenerator()
+    rag = _rag(generator=generator, min_score=1.01)  # nothing can clear this
+    rag.ingest([_doc("a.txt", "alpha beta")])
+    answer = rag.query("alpha", k=2)
+    assert answer.insufficient_context is True
+    assert answer.contexts != ()
+    assert len(generator.calls) == 1
+    rag.min_score = None  # the same hits, floor off: sufficient again
+    assert rag.query("alpha", k=2).insufficient_context is False
+
+
 def test_retrieve_is_the_retriever():
     rag = _rag()
     rag.ingest([_doc("a.txt", "alpha beta"), _doc("b.txt", "gamma")])
@@ -471,8 +499,30 @@ def test_from_defaults_wires_persist_dir_cache_and_local_embedder(
     assert (persist / "nanorag.sqlite").exists()
     assert (persist / "embeddings.sqlite").exists()
     assert rag.embedder.model_id == "stub-model"
+    assert rag.min_score is None  # not the default embedder: no floor
     rag.ingest([_doc("a.txt", "alpha beta")])
     assert rag.query("alpha").contexts[0].chunk.doc_id == stable_doc_id("a.txt")
+    rag.close()
+
+
+def test_from_defaults_applies_the_measured_floor_for_the_default_embedder(
+    tmp_path, monkeypatch
+):
+    from nanorag.embeddings import local
+
+    class StubLocal(FakeEmbedder):
+        def __init__(self, model_id):
+            super().__init__(dim=8, model_id=model_id)
+
+    monkeypatch.setattr(local, "FastEmbedEmbedder", StubLocal)
+    rag = Rag.from_defaults(tmp_path, settings=Settings(), generator=FakeGenerator())
+    assert rag.min_score == DEFAULT_MIN_SCORE
+    rag.close()
+    # An explicit value wins over the default.
+    rag = Rag.from_defaults(
+        tmp_path, settings=Settings(), generator=FakeGenerator(), min_score=None
+    )
+    assert rag.min_score is None
     rag.close()
 
 

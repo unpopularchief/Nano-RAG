@@ -4,8 +4,10 @@ A small, readable, production-capable retrieval-augmented generation **engine**
 — not a framework. The goal is that you can read the whole thing in an
 afternoon, run it against your own documents, and operate it for free.
 
-> **Status: Phase C feature-complete (C1–C3 done); Gate C review pending —
-> `v0.1.0` ships when it closes.** The package installs, lints, type-checks,
+> **Status: `v0.1.0` — the MVP. Phase C is done and Gate C has closed:
+> the query-path types (`Answer`, `Citation`, `Usage`, `Timings`) are
+> frozen, the abstention heuristic is locked by measurement, and the
+> quickstart runs three ways.** The package installs, lints, type-checks,
 > tests and builds a wheel on Linux and Windows. It loads real files
 > (`loaders/`), cleans and chunks them (`cleaning/`, `chunking/`), embeds
 > them locally (`embeddings/` — `fastembed`/ONNX, no torch, cached and
@@ -73,9 +75,12 @@ The same flow with no model, no key and no network at all:
 When retrieval returns nothing usable, the answer is a fixed "I don't have
 enough information in the provided documents to answer that." with
 `answer.insufficient_context = True` and **no model call** — the engine says
-"I don't know" rather than inventing something. When retrieved chunks were
-dropped to fit the model's window, `answer.truncated = True`. Neither is
-ever silent.
+"I don't know" rather than inventing something. When the best hit is there
+but weak, the same flag is set and the model is still asked, under a prompt
+that tells it to abstain; the flag is a tunable heuristic
+(`insufficient_context()` in `pipeline.py`), not a guarantee — see Limits.
+When retrieved chunks were dropped to fit the model's window,
+`answer.truncated = True`. Neither is ever silent.
 
 ## Limits (stated up front)
 
@@ -98,6 +103,16 @@ ever silent.
 - **Ollama serves every model with a 4096-token context** by default
   (`OLLAMA_CONTEXT_LENGTH`); the budget is read from the generator, so
   answers over Ollama see far less context than over Groq.
+- **The abstention signal is a heuristic on the embedder's score scale.**
+  Measured at Gate C with the default embedder on two ~120-chunk corpora
+  (33 answerable vs 32 unrelated questions): the relative top-1-vs-rest
+  gap does *not* separate the two (an answerable question on a densely
+  covered topic has many near-equal hits), so `min_gap` ships off; an
+  absolute top-1 floor does (unrelated ≤ 0.60, answerable ≥ 0.61), so
+  `from_defaults()` sets `min_score=0.55` **for `bge-base-en-v1.5` only**.
+  On-topic questions the corpus does not cover score 0.55–0.71 and are
+  left to the model's own abstention. Any other embedder needs its own
+  measured floor (`Rag(min_score=…)`); a wrong one over- or under-abstains.
 - Free generation tiers may train on submitted prompts (Google's free tier
   does). The Ollama path is the fully-private option. See `docs/providers.md`.
 - A citation proves **provenance, not truth**.

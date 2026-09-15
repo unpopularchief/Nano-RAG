@@ -67,6 +67,24 @@ arithmetic the read path needs (`context_budget`, `insufficient_context`,
 reproduces `Rag.query()` from those functions alone. If a behaviour exists
 only inside the facade, that is a bug.
 
+## Public types
+
+`Answer`, `Citation`, `Usage` and `Timings` are frozen since `v0.1.0`
+(Gate C, plan.md §18 F11): adding, removing or retyping a field is a
+breaking change and bumps the minor while `0.x`. The three machine-readable
+status signals — `Answer.insufficient_context`, `Answer.truncated`,
+`Usage.provider` (who actually served, after fallback) — are part of that
+contract: a caller never parses `text` to learn any of them.
+
+## Abstention
+
+`insufficient_context()` is a tunable heuristic, never a guarantee. Its
+thresholds live on the embedder's score scale, so `Rag()` ships every
+optional check off and only `from_defaults()` sets the floor measured for
+the default embedder. Anything that changes the embedder re-measures
+before it changes the default (the Gate C measurement is recorded in the
+function docstring and README Limits).
+
 ## Configuration
 
 One frozen `Settings` value, built by `Settings.load()` and passed

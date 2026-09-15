@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "nanorag"
-version = "0.0.1"
+version = "0.1.0"
 description = "A small, readable, production-capable retrieval-augmented generation engine you can understand in an afternoon and run for free."
 readme = "README.md"
 license = "MIT"
@@ -12,7 +12,7 @@ requires-python = ">=3.11"
 authors = [{ name = "Niyaf Mukhthaar" }]
 keywords = ["rag", "retrieval", "embeddings", "llm", "numpy", "sqlite"]
 classifiers = [
-    "Development Status :: 2 - Pre-Alpha",
+    "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
