@@ -19,9 +19,13 @@ afternoon, run it against your own documents, and operate it for free.
 > OpenRouter, Ollama, …) and one for Gemini, with typed errors, retries and
 > a fallback chain; `ratelimit.py` guards the single metered call; and
 > `Rag` (`pipeline.py`) is the ~30-line facade that composes it all. The
-> quickstart below works. Citations resolve to text spans in Phase D. See
-> [`plan.md`](plan.md) §9 for the phased roadmap and [`ROADMAP.md`](ROADMAP.md)
-> for the condensed version.
+> quickstart below works, and **citations now resolve to text spans**
+> (`citations/parser.py`, Phase D session D1): every `[n]` marker the model
+> writes is checked against the blocks actually in the prompt and resolved
+> to a `Citation` with the source document, span offsets and a validity
+> rate logged when a marker doesn't resolve. See [`plan.md`](plan.md) §9 for
+> the phased roadmap and [`ROADMAP.md`](ROADMAP.md) for the condensed
+> version.
 
 ## What it will be
 

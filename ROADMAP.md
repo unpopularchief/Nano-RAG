@@ -10,7 +10,7 @@ contiguous release list.
 | **A — Foundation** | `v0.0.1` | Repo installs, lints, type-checks, tests, builds a wheel on Linux + Windows. Core data types. | **done; Gate A passed** |
 | **B — Corpus to index** | `v0.0.4` | Real files → durable, searchable vectors. Fully offline. | **done; Gate B passed** |
 | **C — First answers (MVP)** | `v0.1.0` | Documents in, cited answer out — free key or fully offline. First public release. | **done — `v0.1.0`, Gate C passed** |
-| **D — Trust** | `v0.3.0` | Citations resolving to text spans, a CLI, quality as numbers in CI (≥ 200-item eval set). | not started |
+| **D — Trust** | `v0.3.0` | Citations resolving to text spans, a CLI, quality as numbers in CI (≥ 200-item eval set). | in progress (D1 done) |
 | **E — Durability** | `v0.4.0` | Re-ingesting a changed corpus is correct and cheap. | not started |
 | **F — Quality** | `v0.6.0` | Beat the Phase D baseline with evidence — reranking, BM25/hybrid, MMR. Negative results published. | not started |
 | **G — Reach** | `v0.7.0` | PDF/HTML loaders, external stores (Qdrant, pgvector), hosted embeddings — without touching the core. | not started |
@@ -155,6 +155,31 @@ contiguous release list.
   catalogues (OpenRouter's had been retired and was replaced); the
   three-way quickstart run — fakes in CI, plus the Groq and Ollama legs
   recorded in the Gate C notes.
+
+## Phase D sessions
+
+- **D1** ✅ — `citations/parser.py`. `parse_citations(text, context,
+  get_document=)` scans generated text for `[n]`-shaped markers (one label
+  per bracket — `[1][2]`, never `[1,2]` or `[1-3]`), resolves each against
+  the `Context.blocks` the answer was actually prompted with, and returns a
+  `CitationReport`: deduplicated, label-ordered `Citation`s plus
+  `total_markers`/`resolved_markers`/`validity_rate`. An unresolvable
+  marker (out of range, zero, or simply never in this context) is dropped
+  from the citations but still counted towards the validity rate — never
+  silently ignored. Metadata propagates doc → chunk → context → citation
+  through the existing chain (`ScoredChunk.chunk.doc_id`/`start_char`/
+  `end_char`, `get_document().source_uri`); a citation whose chunk's
+  document is missing from the store raises `StoreError` rather than
+  fabricating one (should be impossible — SQLite commits before a chunk is
+  ever placed in a prompt). Wired into `Rag.query`: `Answer.citations` is
+  now `parse_citations(...).citations` instead of always `()`, and a
+  marker that didn't resolve is logged as a warning (the "report a
+  validity rate" half, matching `_reconcile_usage`'s pattern rather than
+  adding a new `Answer` field — `Answer` is frozen as of `v0.1.0`).
+  Checkpoint met: a 4-document, 7-question fixture corpus with one
+  deliberately hallucinated marker resolves 21/22 markers (≥ 95%); a 300
+  example Hypothesis oracle checks resolution against a plain-Python
+  reference over arbitrary marker streams and block counts.
 
 ## Out of scope through 1.0
 

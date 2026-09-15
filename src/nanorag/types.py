@@ -212,8 +212,9 @@ class ScoredChunk:
 class Citation:
     """A resolved ``[n]`` marker linking answer text back to a source span.
 
-    Stable since ``v0.1.0``. Populated from Phase D (citation resolution);
-    ``Answer.citations`` is empty until then.
+    Stable since ``v0.1.0``. Populated by
+    :func:`nanorag.citations.parser.parse_citations`, wired into
+    ``Rag.query`` in Phase D (session D1).
 
     Attributes
     ----------

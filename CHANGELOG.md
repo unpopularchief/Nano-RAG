@@ -7,6 +7,15 @@ breaking changes bump the minor).
 
 ## [Unreleased]
 
+### Added
+
+- `citations/parser.py` (Phase D, session D1): `parse_citations` resolves a
+  generated answer's `[n]` markers against the `Context` it was prompted
+  with, dropping unresolvable markers while still counting them towards a
+  reported validity rate. `Rag.query` now populates `Answer.citations` from
+  this instead of always returning `()`; a marker that doesn't resolve is
+  logged, not silently dropped.
+
 ## [0.1.0] — 2026-09-15
 
 The MVP: documents in, cited answer out, on a free key or fully offline.

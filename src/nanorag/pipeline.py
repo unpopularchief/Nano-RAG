@@ -23,9 +23,11 @@ know" rather than inventing something (plan.md §11).
 Write path: loader → chunker → embedder → document store → vector store,
 committing SQLite **before** touching the in-memory matrix (plan.md §18 F2).
 
-Citations are Phase D: ``Answer.citations`` is empty here, and
+Citation resolution: ``nanorag.citations.parse_citations`` runs over the
+generator's raw text against the same ``Context`` it was prompted with, and
+``Answer.citations`` is its resolved, label-ordered result.
 ``Answer.contexts`` holds exactly the chunks that were in the prompt so a
-reader can already see the sources.
+reader can see the sources regardless of what the model chose to cite.
 """
 
 from __future__ import annotations
@@ -40,6 +42,7 @@ import numpy as np
 
 from nanorag.chunking.base import Chunker
 from nanorag.chunking.recursive import RecursiveChunker
+from nanorag.citations.parser import CitationReport, parse_citations
 from nanorag.config import Settings
 from nanorag.context.builder import Context, ContextBuilder
 from nanorag.embeddings.base import Embedder
@@ -506,9 +509,13 @@ class Rag:
             generation.usage.prompt_tokens,
             self.budget_margin,
         )
+        report = parse_citations(
+            generation.text, context, get_document=self.docs.get_document
+        )
+        _log_citation_issues(report)
         return Answer(
             text=generation.text,
-            citations=(),
+            citations=report.citations,
             contexts=context.hits,
             insufficient_context=thin,
             truncated=context.truncated,
@@ -533,4 +540,22 @@ def _reconcile_usage(estimated: int, reported: int, margin: float) -> None:
             reported,
             estimated,
             margin * 100,
+        )
+
+
+def _log_citation_issues(report: CitationReport) -> None:
+    """Log when the model cited a marker that did not resolve to a block.
+
+    The "report a validity rate" half of the citation parser's job
+    (plan.md §6) — surfaced as a warning rather than a new ``Answer`` field,
+    matching :func:`_reconcile_usage`'s pattern; ``Answer`` is frozen as of
+    ``v0.1.0`` (plan.md §18 F11).
+    """
+    if report.total_markers and report.resolved_markers < report.total_markers:
+        log.warning(
+            "model cited %d marker(s) that did not resolve to a context block "
+            "(%.0f%% of %d markers valid)",
+            report.total_markers - report.resolved_markers,
+            report.validity_rate * 100,
+            report.total_markers,
         )

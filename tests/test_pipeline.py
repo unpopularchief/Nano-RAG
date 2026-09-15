@@ -235,13 +235,22 @@ def test_ingest_to_answer_end_to_end_with_fakes(tmp_path):
     assert answer.text == "Cats sleep most of the day. [1]"
     assert answer.insufficient_context is False
     assert answer.truncated is False
-    assert answer.citations == ()
     assert answer.usage.provider == "fake"
     assert answer.usage.prompt_tokens > 0
 
     # The best hit is the cats chunk, and [1] resolves to it.
     assert answer.contexts[0].chunk.doc_id == stable_doc_id("cats.txt")
     assert len(answer.contexts) == 2
+    assert len(answer.citations) == 1
+    citation = answer.citations[0]
+    assert citation.label == 1
+    assert citation.chunk_id == answer.contexts[0].chunk.chunk_id
+    assert citation.doc_id == stable_doc_id("cats.txt")
+    assert citation.source_uri == "cats.txt"
+    assert (citation.start_char, citation.end_char) == (
+        answer.contexts[0].chunk.start_char,
+        answer.contexts[0].chunk.end_char,
+    )
     # Exactly those chunks were in the prompt, fenced, in label order.
     prompt = generator.calls[0]
     assert prompt.user.index("[1]\n" + answer.contexts[0].chunk.text) < (
