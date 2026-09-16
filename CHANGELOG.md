@@ -7,6 +7,42 @@ breaking changes bump the minor).
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-09-17
+
+Phase E: re-ingesting a changed corpus is correct and cheap.
+
+### Gate E — decisions locked against plan.md §9's Phase E block
+
+- **E1/E2 checkpoints confirmed**: deleted chunks vanish from search and
+  SQLite in the same `delete_document` call; a 1,000-doc/10-edited re-sync
+  re-embeds only the changed chunks, by composition through `ingest()`'s
+  existing change detection.
+- **Both Phase E Acceptance lines verified literally, not just implied by
+  the mechanism**, closing the two gaps E1/E2 left open:
+  - *"No orphan rows in any table after a full add/edit/delete cycle"* —
+    new `test_full_add_edit_delete_cycle_leaves_no_orphan_rows` drives one
+    `sync_path(apply=True)` through an add, an edit and a delete together
+    and queries `chunks`/`embeddings` directly for rows pointing at a
+    document or chunk that no longer exists. Also closed the adjacent,
+    previously-untested Phase E Tests-list items: editing one document
+    leaves every other document's chunk ids and ordinals byte-identical
+    (`test_editing_one_document_leaves_others_ids_and_ordinals_untouched`),
+    and a crash between the SQLite commit and the in-memory index update
+    (plan.md §18 F2's stated ordering) strands the in-memory index but
+    never SQLite — a fresh rebuild from SQLite alone is exact, with no
+    orphan vectors surviving a restart
+    (`test_interrupted_ingest_leaves_no_orphan_vectors_after_reload`).
+  - *"Phase D eval numbers unchanged by a re-sync"* — new assertions in
+    `test_committed_dataset_meets_committed_thresholds` (`-m eval`) resync
+    the real, already-embedded `datasets/nanorag-docs/corpus/` against
+    itself unedited (`sync_path(..., apply=True)`, all-`unchanged`) and
+    re-measure: `recall@5`/`recall@10`/`mrr`/`ndcg@5` and every other
+    metric are bit-identical before and after, on the real embedder and
+    the real committed dataset — not a fake-embedder proxy for the claim.
+- Version `0.4.0`; classifier stays `4 - Beta` (no new public surface
+  since Gate D's citations/CLI/eval milestone — durability is an
+  internal-correctness phase, not a new capability class).
+
 ### Added
 
 - **Phase E, session E1 — durability.** `Rag.ingest()` does document-level
@@ -37,6 +73,11 @@ breaking changes bump the minor).
   Bounded cost: a document without the group key is never compared
   against anything, and a document that sets it is only ever compared
   against its own group, not the whole corpus.
+- **Gate E review**: three new `tests/test_pipeline.py` tests closing the
+  literal Phase E Tests/Acceptance gaps above, and a resync assertion
+  folded into the existing `-m eval` threshold test (all listed under
+  "Gate E" above) rather than a separate test that would cold-embed the
+  committed corpus a second time and double `eval.yml`'s CI runtime.
 
 ## [0.3.0] — 2026-09-16
 

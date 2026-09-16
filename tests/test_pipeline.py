@@ -469,6 +469,74 @@ def test_near_duplicate_below_threshold_is_not_flagged():
         assert DEDUP_OF_KEY not in chunk.metadata
 
 
+# --- Gate E review: literal checks for the plan.md §9 Phase E Tests/Acceptance
+# bullets that E1/E2 exercised only indirectly ------------------------------
+
+
+def test_editing_one_document_leaves_others_ids_and_ordinals_untouched():
+    rag = _rag()
+    rag.ingest([_doc("a.txt", "alpha beta gamma"), _doc("b.txt", "delta epsilon zeta")])
+    b_before = rag.docs.get_chunks(stable_doc_id("b.txt"))
+
+    rag.ingest([_doc("a.txt", "a completely rewritten document now")])
+
+    b_after = rag.docs.get_chunks(stable_doc_id("b.txt"))
+    assert b_after == b_before  # same ids, same ordinals, same text -- untouched
+
+
+def test_full_add_edit_delete_cycle_leaves_no_orphan_rows(tmp_path):
+    rag = _rag()
+    for name in ("a.txt", "b.txt", "c.txt"):
+        (tmp_path / name).write_text(name, encoding="utf-8")
+    rag.sync_path(tmp_path, apply=True)
+
+    (tmp_path / "b.txt").write_text("b edited", encoding="utf-8")  # update
+    (tmp_path / "c.txt").unlink()  # delete
+    (tmp_path / "d.txt").write_text("d.txt", encoding="utf-8")  # add
+    report = rag.sync_path(tmp_path, apply=True)
+    assert report.applied is True
+
+    conn = rag.docs._conn
+    doc_ids = {row[0] for row in conn.execute("SELECT doc_id FROM documents")}
+    chunk_rows = conn.execute("SELECT chunk_id, doc_id FROM chunks").fetchall()
+    chunk_ids = {row[0] for row in chunk_rows}
+    embedding_chunk_ids = {
+        row[0] for row in conn.execute("SELECT chunk_id FROM embeddings")
+    }
+    # No chunk row points at a document that no longer exists, and no
+    # embedding row points at a chunk that no longer exists -- the literal
+    # "no orphan rows in any table" acceptance line (plan.md §9 Phase E).
+    assert {doc_id for _, doc_id in chunk_rows} <= doc_ids
+    assert embedding_chunk_ids == chunk_ids
+
+
+def test_interrupted_ingest_leaves_no_orphan_vectors_after_reload():
+    rag = _rag()
+    rag.ingest([_doc("a.txt", "alpha beta gamma")])
+    old_chunk_id = rag.docs.get_chunks(stable_doc_id("a.txt"))[0].chunk_id
+
+    def _crash(chunk_ids):
+        raise RuntimeError(
+            "simulated crash between the SQLite commit and the "
+            "in-memory index update (plan.md §18 F2)"
+        )
+
+    rag.vectors.delete = _crash
+    with pytest.raises(RuntimeError):
+        rag.ingest([_doc("a.txt", "a completely rewritten document now")])
+
+    # The SQLite write already committed by the time the crash hits -- only
+    # the chunk id changed there, exactly as an uninterrupted ingest would.
+    new_chunk_id = rag.docs.get_chunks(stable_doc_id("a.txt"))[0].chunk_id
+    assert new_chunk_id != old_chunk_id
+
+    # The crashed process's in-memory index is now stale (still holds the
+    # old id, is missing the new one) -- but a fresh rebuild from SQLite
+    # alone (what a restart does, plan.md §18 F2) is exact: no orphans.
+    rebuilt = load_vectors(rag.docs, dim=DIM)
+    assert set(rebuilt._ids) == {new_chunk_id}
+
+
 # --- read path: the e2e with fakes --------------------------------------------
 
 

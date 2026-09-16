@@ -11,7 +11,7 @@ contiguous release list.
 | **B — Corpus to index** | `v0.0.4` | Real files → durable, searchable vectors. Fully offline. | **done; Gate B passed** |
 | **C — First answers (MVP)** | `v0.1.0` | Documents in, cited answer out — free key or fully offline. First public release. | **done — `v0.1.0`, Gate C passed** |
 | **D — Trust** | `v0.3.0` | Citations resolving to text spans, a CLI, quality as numbers in CI (≥ 200-item eval set). | **done — `v0.3.0`, Gate D passed** |
-| **E — Durability** | `v0.4.0` | Re-ingesting a changed corpus is correct and cheap. | E1–E2 done — Gate E review next |
+| **E — Durability** | `v0.4.0` | Re-ingesting a changed corpus is correct and cheap. | **done — `v0.4.0`, Gate E passed** |
 | **F — Quality** | `v0.6.0` | Beat the Phase D baseline with evidence — reranking, BM25/hybrid, MMR. Negative results published. | not started |
 | **G — Reach** | `v0.7.0` | PDF/HTML loaders, external stores (Qdrant, pgvector), hosted embeddings — without touching the core. | not started |
 | **H — Production** | `v1.0.0` | Structured logging, cost accounting, deployment guide, threat model, API freeze. | not started |
@@ -293,6 +293,24 @@ contiguous release list.
   Documented limit: comparisons run against chunks already persisted
   before this ingest call, so two never-before-seen near-duplicate
   documents landing in the same batch do not catch each other.
+- **🚦 Gate E** ✅ — `v0.4.0`. Reviewed against plan.md §9's Phase E block:
+  the E1/E2 checkpoints hold, and both Acceptance lines were verified
+  literally rather than taken as implied by the mechanism. "No orphan
+  rows in any table after a full add/edit/delete cycle" — a new test
+  drives one `sync_path(apply=True)` through an add, an edit and a delete
+  together and queries `chunks`/`embeddings` directly for rows pointing
+  at a document or chunk that no longer exists; two adjacent,
+  previously-untested Phase E Tests-list items were closed alongside it
+  (editing one document leaves every other document's chunk ids and
+  ordinals untouched; a crash between the SQLite commit and the
+  in-memory index update strands the in-memory index but never SQLite,
+  and a fresh rebuild from SQLite alone is exact). "Phase D eval numbers
+  unchanged by a re-sync" — the real, already-embedded committed corpus
+  was resynced against itself unedited and re-measured inside the
+  existing `-m eval` threshold test (reusing the same embedded index
+  rather than a second cold pass, which would have doubled `eval.yml`'s
+  CI runtime): every metric came back bit-identical. See CHANGELOG
+  `[0.4.0]` for the full list.
 
 ## Out of scope through 1.0
 

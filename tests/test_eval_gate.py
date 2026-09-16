@@ -58,6 +58,20 @@ def test_committed_dataset_meets_committed_thresholds(tmp_path):
         )
         try:
             report = evaluate_retrieval(dataset, rag)
+
+            # plan.md §9 Phase E Acceptance: "Phase D eval numbers unchanged
+            # by a re-sync." Reuses this same already-embedded `rag` rather
+            # than building a second one -- `datasets/nanorag-docs/corpus/`
+            # is a real directory that `load_corpus` already walked with
+            # `DirectoryLoader` and the default "**/*" glob, the same
+            # combination `sync_path` uses, so resyncing it unedited here
+            # and re-measuring is the literal acceptance scenario, on the
+            # real embedder and the real committed dataset, without paying
+            # for a second cold corpus embedding pass.
+            sync = rag.sync_path(DATASET / "corpus", glob="**/*", apply=True)
+            assert (sync.added, sync.updated, sync.deleted) == ((), (), ())
+            resynced = evaluate_retrieval(dataset, rag)
+            assert resynced.metrics == report.metrics
         finally:
             rag.close()
     print("\n" + render_report(report))

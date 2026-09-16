@@ -4,9 +4,10 @@ A small, readable, production-capable retrieval-augmented generation **engine**
 — not a framework. The goal is that you can read the whole thing in an
 afternoon, run it against your own documents, and operate it for free.
 
-> **Status: `v0.3.0` — Phase D is done and Gate D has closed: citations
-> resolve to text spans, there's a command line, and quality is a number
-> enforced in CI.** The package installs, lints, type-checks,
+> **Status: `v0.4.0` — Phase D and Phase E are done and Gate D/Gate E have
+> both closed: citations resolve to text spans, there's a command line,
+> quality is a number enforced in CI, and re-ingesting a changed corpus is
+> correct and cheap.** The package installs, lints, type-checks,
 > tests and builds a wheel on Linux and Windows. It loads real files
 > (`loaders/`), cleans and chunks them (`cleaning/`, `chunking/`), embeds
 > them locally (`embeddings/` — `fastembed`/ONNX, no torch, cached and
@@ -29,18 +30,21 @@ afternoon, run it against your own documents, and operate it for free.
 > 341-item dataset, Recall/MRR/nDCG against gold spans, a nightly CI gate
 > with committed thresholds, and a chunk-size sweep that changed the
 > default chunker — see [`docs/evaluation.md`](docs/evaluation.md) and the
-> numbers below. **Phase E (durability, sessions E1–E2) is feature-complete,
-> Gate E review next:** `Rag.ingest()` skips a document entirely — no
-> rechunk, no re-embed, no store write — when its content hasn't changed
-> since the last ingest; `Rag.delete_document(doc_id)` / `Rag.compact()`
-> remove a document from search and the store for good; `Rag.sync_path(root)`
-> reconciles the whole index against a directory in one call — dry run by
-> default, `apply=True` to add/update/delete for real, with a guard that
-> refuses to delete past a configurable fraction of the corpus in one run —
-> also a CLI command, `nanorag sync ROOT [--apply]`; and near-duplicate
-> chunks (opted in per document via metadata) are flagged, not dropped. See
-> [`plan.md`](plan.md) §9 for the phased roadmap and
-> [`ROADMAP.md`](ROADMAP.md) for the condensed version.
+> numbers below. **And Phase E (durability) is done — Gate E has closed:**
+> `Rag.ingest()` skips a document entirely — no rechunk, no re-embed, no
+> store write — when its content hasn't changed since the last ingest;
+> `Rag.delete_document(doc_id)` / `Rag.compact()` remove a document from
+> search and the store for good; `Rag.sync_path(root)` reconciles the
+> whole index against a directory in one call — dry run by default,
+> `apply=True` to add/update/delete for real, with a guard that refuses to
+> delete past a configurable fraction of the corpus in one run — also a
+> CLI command, `nanorag sync ROOT [--apply]`; and near-duplicate chunks
+> (opted in per document via metadata) are flagged, not dropped. The gate
+> review verified both Phase E acceptance criteria literally: no orphan
+> rows in any table after a combined add/edit/delete cycle, and the Phase
+> D eval numbers are bit-identical before and after resyncing the real
+> committed corpus unedited. See [`plan.md`](plan.md) §9 for the phased
+> roadmap and [`ROADMAP.md`](ROADMAP.md) for the condensed version.
 
 ## What it will be
 
