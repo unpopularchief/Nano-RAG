@@ -134,7 +134,8 @@ def test_leading_zero_marker_resolves_by_integer_value():
 
 
 @pytest.mark.parametrize(
-    "text", ["[1,2]", "[1-3]", "[abc]", "[]", "no markers here", "[ 1 ]"]
+    "text",
+    ["[1,2]", "[1-3]", "[abc]", "[]", "no markers here", "[ 1 ]", "【1,2】", "[1】"],
 )
 def test_non_marker_bracket_shapes_are_not_counted_at_all(text):
     hits = [_hit("a", doc="a")]
@@ -142,6 +143,19 @@ def test_non_marker_bracket_shapes_are_not_counted_at_all(text):
     report = parse_citations(text, context, get_document=_docs_of(hits))
     assert report.total_markers == 0
     assert report.citations == ()
+
+
+def test_fullwidth_brackets_resolve_like_ascii_ones():
+    # openai/gpt-oss-120b writes 【3】 for [3] (D2 live run); both are markers.
+    hits = [_hit("a", doc="a"), _hit("b", doc="b"), _hit("c", doc="c")]
+    context = _context(hits)
+    report = parse_citations(
+        "First claim【1】, second [2], hallucinated【9】.",
+        context,
+        get_document=_docs_of(hits),
+    )
+    assert (report.total_markers, report.resolved_markers) == (3, 2)
+    assert [c.label for c in report.citations] == [1, 2]
 
 
 def test_missing_document_raises_store_error():

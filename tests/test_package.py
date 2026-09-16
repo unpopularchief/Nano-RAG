@@ -52,6 +52,7 @@ def test_every_submodule_imports_cleanly():
         "nanorag.pipeline",
         "nanorag.observability",
         "nanorag.generation",
+        "nanorag.cli",
     ):
         importlib.import_module(mod)
 

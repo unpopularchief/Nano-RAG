@@ -241,6 +241,21 @@ class SqliteDocumentStore:
         for row in cursor:
             yield _row_to_document(row)
 
+    def count_documents(self) -> int:
+        """Return the number of stored documents."""
+        row = self._conn.execute("SELECT COUNT(*) FROM documents").fetchone()
+        return int(row[0])
+
+    def count_chunks(self, doc_id: str | None = None) -> int:
+        """Return the number of stored chunks, for *doc_id* or in total."""
+        if doc_id is None:
+            row = self._conn.execute("SELECT COUNT(*) FROM chunks").fetchone()
+        else:
+            row = self._conn.execute(
+                "SELECT COUNT(*) FROM chunks WHERE doc_id = ?", (doc_id,)
+            ).fetchone()
+        return int(row[0])
+
     def delete_document(self, doc_id: str) -> None:
         """Delete a document and, via cascade, its chunks and embeddings."""
         with self._conn:

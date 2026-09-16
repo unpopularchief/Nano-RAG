@@ -50,7 +50,8 @@ token budget is read from the generator, never hard-coded.
 
 Environment variables only: `GROQ_API_KEY`, `GEMINI_API_KEY`, `JINA_API_KEY`.
 Never written to disk, never logged, never in `repr()` or exception text.
-`.env` support is a three-line optional read in the CLI, not a dependency.
+The CLI reads a `.env` in the working directory (`docs/cli.md`) — a
+few-line optional read, not a dependency.
 CI never holds a key — the default suite is fully offline against fakes.
 
 ## Clients

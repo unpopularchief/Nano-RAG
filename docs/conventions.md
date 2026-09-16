@@ -93,11 +93,23 @@ high: field defaults → `[tool.nanorag]` in `pyproject.toml` → named profile
 (`profile=` / `NANORAG_PROFILE`) → individual `NANORAG_<FIELD>` env vars →
 explicit keyword arguments. Any invalid value raises `ConfigError`.
 
+## Command line
+
+`cli/` is a thin shell over the facade: one module per subcommand, each
+`run(args, settings) -> payload` + `render(payload) -> str`, so `--json`
+and the text output are the same data and the JSON schema in `docs/cli.md`
+is the whole contract. stdout is the result and nothing else; logging,
+warnings and errors go to stderr. Exit codes map onto the error hierarchy
+(`ConfigError` 3, `ProviderError` 4, `StoreError` 5, other `NanoRagError`
+1, usage 2); an exception that is not a `NanoRagError` propagates. No
+logic lives in the CLI that a library caller cannot reach.
+
 ## Keys & secrets
 
 Environment variables only (`GROQ_API_KEY`, `GEMINI_API_KEY`, `JINA_API_KEY`).
-Never written to disk, never logged, never in `repr()` or exception text. CI
-never holds a key.
+Never written to disk, never logged, never in `repr()` or exception text. The
+CLI's `.env` read exports into the environment where unset and prints
+nothing. CI never holds a key.
 
 ## Concurrency
 

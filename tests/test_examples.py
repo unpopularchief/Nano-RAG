@@ -31,7 +31,8 @@ def test_offline_fakes_example_runs_without_network():
         check=True,
         timeout=120,
     )
-    assert "ingested 2 documents" in out.stdout
+    n_docs = len(list((ROOT / "docs").glob("**/*.md")))
+    assert f"ingested {n_docs} documents" in out.stdout
     assert "A: Keys come from environment variables only. [1]" in out.stdout
     assert "[1]" in out.stdout and "providers.md" in out.stdout
     assert "=== BEGIN UNTRUSTED CONTEXT " in out.stdout

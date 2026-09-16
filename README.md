@@ -23,9 +23,11 @@ afternoon, run it against your own documents, and operate it for free.
 > (`citations/parser.py`, Phase D session D1): every `[n]` marker the model
 > writes is checked against the blocks actually in the prompt and resolved
 > to a `Citation` with the source document, span offsets and a validity
-> rate logged when a marker doesn't resolve. See [`plan.md`](plan.md) §9 for
-> the phased roadmap and [`ROADMAP.md`](ROADMAP.md) for the condensed
-> version.
+> rate logged when a marker doesn't resolve. **There is a command line**
+> (`cli/`, session D2): `nanorag ingest | query | inspect`, with `--json`
+> payloads and exit codes documented in [`docs/cli.md`](docs/cli.md). See
+> [`plan.md`](plan.md) §9 for the phased roadmap and
+> [`ROADMAP.md`](ROADMAP.md) for the condensed version.
 
 ## What it will be
 
@@ -75,6 +77,24 @@ generator at Ollama (`NANORAG_PROFILE=local`) removes that too.
 The same flow with no model, no key and no network at all:
 `uv run python examples/offline_fakes.py`. The README flow as a script:
 `examples/quickstart.py`.
+
+## Command line
+
+The same two paths as a command — `nanorag`, installed with the package:
+
+```bash
+nanorag ingest docs/ --glob "**/*.md"          # offline: local embeddings, no key needed
+nanorag query "Where do API keys come from?"   # answer + citations + the blocks in the prompt
+nanorag query "…" --json | jq .answer.citations
+nanorag inspect                                # model, counts, one line per document
+```
+
+stdout carries only the result (logs and errors go to stderr), `--json`
+prints one documented object per command, and the exit code says what went
+wrong: `2` usage, `3` configuration (no generator, no `[local]` extra), `4`
+the provider (rejected key, spent quota), `5` the store (index built with
+another model). A `.env` file in the working directory is read for keys.
+Everything is in [`docs/cli.md`](docs/cli.md).
 
 When retrieval returns nothing usable, the answer is a fixed "I don't have
 enough information in the provided documents to answer that." with

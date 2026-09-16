@@ -122,6 +122,20 @@ def test_iter_documents_and_iter_chunks(tmp_path):
     assert {c.doc_id for c in store.iter_chunks()} == {doc_a.doc_id, doc_b.doc_id}
 
 
+def test_count_documents_and_chunks(tmp_path):
+    store = SqliteDocumentStore(tmp_path / "db.sqlite3")
+    assert (store.count_documents(), store.count_chunks()) == (0, 0)
+    doc_a = _doc("a.txt", "aa bb")
+    doc_b = _doc("b.txt", "cc")
+    store.upsert_document(doc_a, _chunks(doc_a, "aa", "bb"))
+    store.upsert_document(doc_b, _chunks(doc_b, "cc"))
+    assert (store.count_documents(), store.count_chunks()) == (2, 3)
+    assert store.count_chunks(doc_a.doc_id) == 2
+    assert store.count_chunks("no-such-doc") == 0
+    store.delete_document(doc_a.doc_id)
+    assert (store.count_documents(), store.count_chunks()) == (1, 1)
+
+
 def test_delete_document_cascades_to_chunks_and_embeddings(tmp_path):
     doc = _doc("a.txt", "hello world")
     chunks = _chunks(doc, "hello world")

@@ -41,6 +41,9 @@ pdf = ["pypdf"]
 html = ["selectolax"]
 dev = ["pytest>=7", "pytest-cov", "ruff", "pre-commit", "mypy", "hypothesis"]
 
+[project.scripts]
+nanorag = "nanorag.cli:main"
+
 [project.urls]
 Repository = "https://github.com/unpopularchief/Nano-RAG"
 

@@ -10,7 +10,7 @@ contiguous release list.
 | **A — Foundation** | `v0.0.1` | Repo installs, lints, type-checks, tests, builds a wheel on Linux + Windows. Core data types. | **done; Gate A passed** |
 | **B — Corpus to index** | `v0.0.4` | Real files → durable, searchable vectors. Fully offline. | **done; Gate B passed** |
 | **C — First answers (MVP)** | `v0.1.0` | Documents in, cited answer out — free key or fully offline. First public release. | **done — `v0.1.0`, Gate C passed** |
-| **D — Trust** | `v0.3.0` | Citations resolving to text spans, a CLI, quality as numbers in CI (≥ 200-item eval set). | in progress (D1 done) |
+| **D — Trust** | `v0.3.0` | Citations resolving to text spans, a CLI, quality as numbers in CI (≥ 200-item eval set). | in progress (D1, D2 done) |
 | **E — Durability** | `v0.4.0` | Re-ingesting a changed corpus is correct and cheap. | not started |
 | **F — Quality** | `v0.6.0` | Beat the Phase D baseline with evidence — reranking, BM25/hybrid, MMR. Negative results published. | not started |
 | **G — Reach** | `v0.7.0` | PDF/HTML loaders, external stores (Qdrant, pgvector), hosted embeddings — without touching the core. | not started |
@@ -180,6 +180,29 @@ contiguous release list.
   deliberately hallucinated marker resolves 21/22 markers (≥ 95%); a 300
   example Hypothesis oracle checks resolution against a plain-Python
   reference over arbitrary marker streams and block counts.
+- **D2** ✅ — `cli/`: `nanorag ingest | query | inspect`, installed as the
+  `nanorag` console script (also `python -m nanorag.cli`). Each subcommand
+  is one module with the same shape — `run()` returns a JSON-serialisable
+  payload, `render()` turns it into text — so `--json` and the text output
+  are the same data. stdout is the result and nothing else; logs, warnings
+  and errors go to stderr. Exit codes follow the error hierarchy: `0`
+  success (an "I don't know" included), `1` other `NanoRagError`, `2`
+  usage, `3` `ConfigError`, `4` `ProviderError`, `5` `StoreError`; a
+  non-`nanorag` exception propagates as the bug it is. `ingest` is fully
+  offline — a new `generation.NullGenerator` fills the generator slot so no
+  key is read and no server probed; `inspect` opens the SQLite store
+  directly and never creates one. `query --json` is `Answer.to_dict()` (the
+  frozen public type) plus `sources` resolving each context label to its
+  file; `--filter` takes the `store/filters.py` grammar as JSON;
+  `--generator` maps onto the existing preset lookup in `Settings`. The
+  "three-line optional `.env` read" from plan.md §4: `KEY=VALUE` lines
+  exported only where unset, never printed. Checkpoint met: the payload
+  schemas and exit codes are documented in `docs/cli.md` and asserted key
+  for key in `tests/test_cli.py`. The live run (Groq, Ollama, a rejected
+  key) exposed a D1 gap — `openai/gpt-oss-120b` writes its markers as
+  fullwidth `【3】`, which the parser neither resolved nor counted — fixed
+  by accepting `【n】` alongside `[n]`. `nanorag eval` lands with the
+  harness in D3.
 
 ## Out of scope through 1.0
 

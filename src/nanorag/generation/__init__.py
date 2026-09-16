@@ -2,7 +2,8 @@
 
 Two HTTP clients cover five-plus services (plan.md §4):
 ``OpenAICompatGenerator`` (Groq, OpenRouter, Ollama, … via a ``Preset``)
-and ``GeminiGenerator``. ``FallbackGenerator`` chains any of them.
+and ``GeminiGenerator``. ``FallbackGenerator`` chains any of them;
+``NullGenerator`` stands in for a pipeline that only ingests.
 
 The protocol, result type, presets and fallback chain import no HTTP
 client and are exported eagerly. The two concrete clients pull ``httpx``,
@@ -23,6 +24,7 @@ from nanorag.generation.base import (
     retry_after_seconds,
 )
 from nanorag.generation.fallback import FallbackGenerator
+from nanorag.generation.null import NullGenerator
 from nanorag.generation.presets import GROQ, OLLAMA, OPENROUTER, PRESETS, Preset
 
 __all__ = [
@@ -31,6 +33,7 @@ __all__ = [
     "looks_like_daily_quota",
     "retry_after_seconds",
     "FallbackGenerator",
+    "NullGenerator",
     "Preset",
     "PRESETS",
     "GROQ",

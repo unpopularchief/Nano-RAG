@@ -15,6 +15,28 @@ breaking changes bump the minor).
   reported validity rate. `Rag.query` now populates `Answer.citations` from
   this instead of always returning `()`; a marker that doesn't resolve is
   logged, not silently dropped.
+- `cli/` (Phase D, session D2): the `nanorag` command — `ingest ROOT`
+  (offline), `query QUESTION` (one generation call) and `inspect` (opens
+  the store directly, loads no model), each with `--json` for a documented
+  payload (`docs/cli.md`) and stable exit codes (`2` usage, `3`
+  `ConfigError`, `4` `ProviderError`, `5` `StoreError`). stdout holds only
+  the result; logs and errors go to stderr. `.env` in the working directory
+  (or `--env-file`) is read for keys, never written or printed. Installed
+  as a console script (`[project.scripts]`) and runnable as
+  `python -m nanorag.cli`.
+- `generation.NullGenerator`: the null object for a pipeline that only
+  ingests — satisfies the `Generator` protocol, raises `ConfigError` on the
+  first `generate`. `Rag.from_defaults(generator=NullGenerator())` builds
+  an index without reading a key or probing Ollama.
+- `SqliteDocumentStore.count_documents()` / `count_chunks(doc_id=None)`.
+
+### Fixed
+
+- `citations/parser.py` now reads fullwidth `【n】` markers as `[n]`.
+  `openai/gpt-oss-120b` — the Groq preset default — writes them that way
+  even when the prompt shows `[n]`; before this, every citation in a
+  correct answer from the primary provider went unresolved *and* uncounted
+  (a validity rate of "no markers", not "0 %"), so nothing was logged.
 
 ## [0.1.0] — 2026-09-15
 

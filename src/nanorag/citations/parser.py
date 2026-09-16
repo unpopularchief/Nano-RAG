@@ -8,9 +8,11 @@ report a validity rate. Explicitly not its job: judging factual correctness
 Markers follow the system prompt's documented convention (plan.md
 ``prompting/templates.py``): one label per bracket, e.g. ``[1]`` or
 ``[2][3]``, never ``[1,2]`` or ``[1-3]`` — those are not markers under this
-parser and are neither counted nor resolved. A marker is *resolvable* when
-its number is a real block label in *context*; anything else (out of range,
-zero, or simply never in this context) is dropped from
+parser and are neither counted nor resolved. The fullwidth ``【n】`` some
+models substitute is read as the same marker (see :data:`MARKER_PATTERN`).
+A marker is *resolvable* when its number is a real block label in
+*context*; anything else (out of range, zero, or simply never in this
+context) is dropped from
 ``CitationReport.citations`` but still counted in ``total_markers`` for the
 validity rate. ``Answer.citations`` is populated with the result, sorted by
 label — the same order the ``Citation`` docstring promises — even though a
@@ -41,7 +43,11 @@ if TYPE_CHECKING:
     from nanorag.types import Document
 
 #: One label per bracket — ``[12]`` matches, ``[1,2]`` and ``[1-3]`` do not.
-MARKER_PATTERN = re.compile(r"\[(\d+)\]")
+#: The fullwidth form ``【12】`` is accepted too: ``openai/gpt-oss-120b`` (the
+#: Groq preset default) writes its markers that way even when the prompt
+#: shows ``[n]`` — seen in the D2 live run, where every citation of a correct
+#: answer went unresolved *and* uncounted. Either bracket pair, never mixed.
+MARKER_PATTERN = re.compile(r"\[(\d+)\]|【(\d+)】")
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,7 +142,7 @@ def parse_citations(
     citations: dict[int, Citation] = {}
     for match in MARKER_PATTERN.finditer(text):
         total += 1
-        label = int(match.group(1))
+        label = int(match.group(1) or match.group(2))
         hit = by_label.get(label)
         if hit is None:
             continue
