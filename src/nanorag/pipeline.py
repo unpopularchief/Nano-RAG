@@ -3,12 +3,12 @@
 The two rules that keep this from becoming a framework (plan.md §5):
 
 1. **The facade owns no logic.** ``Rag.query()`` is a readable composition
-   of public functions — retrieve, budget, build context, build prompt,
-   generate — every one of which a caller can invoke directly. The three
+   of public functions — retrieve, rerank, budget, build context, build
+   prompt, generate — every one of which a caller can invoke directly. The
    pieces of arithmetic it needs (:func:`context_budget`,
-   :func:`insufficient_context`, :func:`load_vectors`) are module-level
-   functions here, not methods, for the same reason — as are the three
-   ``from_defaults()`` choices (:func:`default_embedder`,
+   :func:`insufficient_context`, :func:`load_vectors`, :func:`rerank_hits`)
+   are module-level functions here, not methods, for the same reason — as
+   are the three ``from_defaults()`` choices (:func:`default_embedder`,
    :func:`default_min_score`, :func:`default_generator`), so an eval run
    or a CLI command can wire exactly what a user would get.
 2. **Protocols, not base classes.** Every component is duck-typed:
@@ -50,13 +50,21 @@ from nanorag.citations.parser import CitationReport, parse_citations
 from nanorag.config import Settings
 from nanorag.context.builder import Context, ContextBuilder
 from nanorag.embeddings.base import Embedder
-from nanorag.errors import ConfigError, IndexModelMismatch, StoreError
+from nanorag.errors import (
+    ConfigError,
+    IndexModelMismatch,
+    RerankError,
+    RetrievalError,
+    StoreError,
+)
 from nanorag.generation.base import Generator
 from nanorag.generation.presets import GROQ, OLLAMA
 from nanorag.hashing import normalize_text
 from nanorag.loaders.directory import DirectoryLoader
 from nanorag.observability.timing import Timer
 from nanorag.prompting.templates import INSUFFICIENT_CONTEXT_TEXT, PromptBuilder
+from nanorag.rerank.base import Reranker
+from nanorag.rerank.identity import IdentityReranker
 from nanorag.retrieval.dense import DenseRetriever
 from nanorag.store.filters import Filter
 from nanorag.store.numpy_store import NumpyVectorStore
@@ -204,6 +212,34 @@ def load_vectors(docs: SqliteDocumentStore, dim: int) -> NumpyVectorStore:
     if ids:
         vectors.upsert(ids, np.stack(rows))
     return vectors
+
+
+def rerank_hits(
+    reranker: Reranker, query: str, hits: list[ScoredChunk], top_n: int
+) -> list[ScoredChunk]:
+    """Rerank *hits* to *top_n* via *reranker*, never failing the caller.
+
+    A module-level function, not a ``Rag`` method, for the same reason
+    :func:`context_budget`/:func:`insufficient_context` are (plan.md §5
+    rule 1): both :meth:`Rag.retrieve` and :meth:`Rag.query` call it, and
+    so does the eval runner (:func:`~nanorag.evaluation.runner.
+    evaluate_retrieval`), which measures a reranker's effect on *ranking*
+    the same way ``Rag`` itself would, wired from public pieces
+    (``rag.reranker``) rather than duplicating this fallback logic.
+
+    A ``reranker`` that raises ``RerankError`` degrades to the retriever's
+    own order (``hits[:top_n]``), with a warning logged, rather than
+    failing the call (plan.md §9 Phase F Tests).
+    """
+    try:
+        return reranker.rerank(query, hits, top_n)
+    except RerankError:
+        log.warning(
+            "reranker %r failed, falling back to retriever order",
+            reranker,
+            exc_info=True,
+        )
+        return hits[:top_n]
 
 
 def default_embedder(settings: Settings, root: str | Path) -> Embedder:
@@ -357,7 +393,22 @@ class Rag:
         Llama/Gemini/Qwen tokenizers actually in play, which is why
         *budget_margin* exists (plan.md §18 F4).
     k
-        Chunks retrieved per query.
+        Chunks kept per query, after reranking.
+    reranker
+        Re-scores the ``retrieve_k`` candidates down to *k* (plan.md §9
+        Phase F). Defaults to :class:`~nanorag.rerank.identity.
+        IdentityReranker` — a pure slice, no re-scoring — so a caller who
+        never touches this parameter sees behaviour identical to before
+        Phase F. A reranker that raises ``RerankError`` degrades the query
+        to the retriever's own order (a warning is logged) rather than
+        failing it.
+    retrieve_k
+        Candidates the retriever fetches *before* reranking. Defaults to
+        *k* itself — with the identity reranker this makes "retrieve" and
+        "keep" the same set, exactly the pre-Phase-F behaviour. Pass a
+        larger value when *reranker* is a real one, so it has more than
+        *k* candidates to choose from (plan.md §9 Phase F "retrieve-k /
+        rerank-to-n wiring").
     budget_margin
         Safety fraction taken off the context budget.
     min_results, min_gap, min_score
@@ -389,6 +440,8 @@ class Rag:
         prompt_builder: PromptBuilder | None = None,
         counter: TokenCounter | None = None,
         k: int = DEFAULT_K,
+        reranker: Reranker | None = None,
+        retrieve_k: int | None = None,
         budget_margin: float = DEFAULT_BUDGET_MARGIN,
         min_results: int = 1,
         min_gap: float = 0.0,
@@ -419,7 +472,12 @@ class Rag:
         self.counter: TokenCounter = (
             counter if counter is not None else TiktokenCounter("cl100k_base")
         )
-        self.retriever = DenseRetriever(embedder, self.vectors, docs, k=k)
+        self.k = k
+        self.retrieve_k = retrieve_k if retrieve_k is not None else k
+        self.retriever = DenseRetriever(embedder, self.vectors, docs, k=self.retrieve_k)
+        self.reranker: Reranker = (
+            reranker if reranker is not None else IdentityReranker()
+        )
         self.budget_margin = budget_margin
         self.min_results = min_results
         self.min_gap = min_gap
@@ -728,8 +786,28 @@ class Rag:
     def retrieve(
         self, query: str, k: int | None = None, filter: Filter | None = None
     ) -> list[ScoredChunk]:
-        """Top-*k* chunks for *query*, pre-filtered (see ``DenseRetriever``)."""
-        return self.retriever.retrieve(query, k=k, filter=filter)
+        """Top-*k* chunks for *query*: retrieve, then rerank down to *k*.
+
+        Fetches ``max(self.retrieve_k, k)`` pre-filtered candidates (see
+        ``DenseRetriever``) and reranks them to *k* via ``self.reranker`` —
+        the identity reranker by default, a pure slice that makes this
+        byte-identical to retrieval before Phase F unless a real reranker
+        is wired in. A reranker that raises ``RerankError`` degrades to
+        the retriever's own order, with a warning logged, rather than
+        failing the call (plan.md §9 Phase F Tests).
+        """
+        final_k = self._resolve_k(k)
+        hits = self.retriever.retrieve(
+            query, k=max(self.retrieve_k, final_k), filter=filter
+        )
+        return rerank_hits(self.reranker, query, hits, final_k)
+
+    def _resolve_k(self, k: int | None) -> int:
+        """Return *k*, or ``self.k``, validated ``>= 1``."""
+        final_k = k if k is not None else self.k
+        if final_k < 1:
+            raise RetrievalError(f"k must be >= 1, got {final_k}")
+        return final_k
 
     def query(
         self, question: str, *, k: int | None = None, filter: Filter | None = None
@@ -737,11 +815,22 @@ class Rag:
         """Retrieve, budget, fence, generate — and say so if there is nothing.
 
         Every step is a public function a caller could run by hand; this
-        method only sequences them and records timings.
+        method only sequences them and records timings. Abstention
+        (``insufficient_context``) is judged on the retriever's own dense
+        hits, never the reranked ones: its thresholds live on the
+        embedder's score scale (plan.md §18 F10, ``docs/conventions.md``
+        "Abstention"), and a reranker's score generally is not — Jina's and
+        the local cross-encoder's are both on their own, uncalibrated
+        scales. Reranking still decides what goes *in* the prompt; it just
+        never gets to decide whether there was enough to prompt with.
         """
         timer = Timer()
+        final_k = self._resolve_k(k)
         with timer.stage("retrieve"):
-            hits = self.retrieve(question, k=k, filter=filter)
+            dense_hits = self.retriever.retrieve(
+                question, k=max(self.retrieve_k, final_k), filter=filter
+            )
+            hits = rerank_hits(self.reranker, question, dense_hits, final_k)
 
         with timer.stage("context"):
             overhead = self.counter.count(
@@ -755,7 +844,7 @@ class Rag:
             )
             context = ContextBuilder(budget, counter=self.counter).build(hits)
             thin = insufficient_context(
-                hits,
+                dense_hits[:final_k],
                 min_results=self.min_results,
                 min_gap=self.min_gap,
                 min_score=self.min_score,

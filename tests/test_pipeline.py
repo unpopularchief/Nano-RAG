@@ -15,7 +15,13 @@ from nanorag import Rag
 from nanorag.chunking import RecursiveChunker
 from nanorag.config import Settings
 from nanorag.context import ContextBuilder
-from nanorag.errors import ConfigError, IndexModelMismatch, StoreError
+from nanorag.errors import (
+    ConfigError,
+    IndexModelMismatch,
+    RerankError,
+    RetrievalError,
+    StoreError,
+)
 from nanorag.generation import FallbackGenerator, Generation
 from nanorag.hashing import content_hash, stable_doc_id
 from nanorag.pipeline import (
@@ -29,11 +35,12 @@ from nanorag.pipeline import (
     load_vectors,
 )
 from nanorag.prompting import INSUFFICIENT_CONTEXT_TEXT, PromptBuilder
+from nanorag.rerank.identity import IdentityReranker
 from nanorag.retrieval import DenseRetriever
 from nanorag.store import SqliteDocumentStore
 from nanorag.tokens import HeuristicCounter
 from nanorag.types import Answer, Chunk, Document, ScoredChunk, Usage
-from tests.fakes import FakeEmbedder, FakeGenerator
+from tests.fakes import FakeEmbedder, FakeGenerator, FakeReranker
 
 DIM = 256  # wide enough that the hashing fake has no accidental collisions
 
@@ -651,11 +658,124 @@ def test_absolute_floor_flags_a_low_top_score_but_still_answers():
     assert rag.query("alpha", k=2).insufficient_context is False
 
 
-def test_retrieve_is_the_retriever():
+def test_retrieve_is_reproducible_from_the_retriever_and_reranker_alone():
+    """plan.md §15 #5: nothing inside ``retrieve()`` a caller cannot do by
+    hand from the two public objects it composes."""
     rag = _rag()
     rag.ingest([_doc("a.txt", "alpha beta"), _doc("b.txt", "gamma")])
-    assert rag.retrieve("alpha", k=1) == rag.retriever.retrieve("alpha", k=1)
+
+    by_hand = rag.reranker.rerank(
+        "alpha", rag.retriever.retrieve("alpha", k=max(rag.retrieve_k, 1)), 1
+    )
+    assert rag.retrieve("alpha", k=1) == by_hand
     assert rag.retrieve("alpha", k=1)[0].chunk.doc_id == stable_doc_id("a.txt")
+
+
+# --- reranking: retrieve-k / rerank-to-n wiring (plan.md §9 Phase F) -----------
+
+
+def test_default_reranker_is_identity_and_retrieve_k_defaults_to_k():
+    rag = _rag(k=3)
+    assert isinstance(rag.reranker, IdentityReranker)
+    assert rag.retrieve_k == 3
+
+
+def test_retrieve_k_is_independently_overridable():
+    rag = _rag(k=2, retrieve_k=10)
+    assert (rag.k, rag.retrieve_k) == (2, 10)
+
+
+def test_reranker_receives_the_oversampled_pool_and_narrows_to_k():
+    fake = FakeReranker()
+    rag = _rag(k=2, retrieve_k=4, reranker=fake)
+    rag.ingest(
+        [
+            _doc(f"{i}.txt", "alpha beta gamma delta epsilon")
+            for i in range(6)  # more candidates than retrieve_k
+        ]
+    )
+
+    hits = rag.retrieve("alpha", k=2)
+
+    assert len(hits) == 2
+    ([query, n_hits, top_n],) = [list(c) for c in fake.calls]
+    assert (query, n_hits, top_n) == ("alpha", 4, 2)
+
+
+def test_reranker_call_narrows_dynamically_when_a_per_call_k_exceeds_retrieve_k():
+    fake = FakeReranker()
+    rag = _rag(k=2, retrieve_k=2, reranker=fake)
+    rag.ingest([_doc(f"{i}.txt", "alpha beta gamma") for i in range(5)])
+
+    rag.retrieve("alpha", k=5)  # per-call k > retrieve_k
+
+    (call,) = fake.calls
+    assert call == ("alpha", 5, 5)  # widened to cover the larger request
+
+
+def test_reranker_reorders_and_rescores_results():
+    rag = _rag(reranker=FakeReranker(score=lambda text: len(text)))
+    rag.ingest(
+        [_doc("short.txt", "a"), _doc("long.txt", "a much longer chunk of text")]
+    )
+
+    hits = rag.retrieve("a", k=2)
+
+    assert [h.chunk.doc_id for h in hits] == [
+        stable_doc_id("long.txt"),
+        stable_doc_id("short.txt"),
+    ]
+    assert all(h.source == "rerank:fake" for h in hits)
+
+
+def test_reranker_failure_degrades_to_retriever_order_with_a_warning(caplog):
+    rag = _rag(reranker=FakeReranker(error=RerankError("boom")))
+    rag.ingest([_doc("a.txt", "alpha beta"), _doc("b.txt", "alpha gamma")])
+    dense_order = rag.retriever.retrieve("alpha", k=rag.retrieve_k)
+
+    with caplog.at_level(logging.WARNING):
+        hits = rag.retrieve("alpha", k=2)
+
+    assert hits == dense_order[:2]
+    assert any("reranker" in r.message.lower() for r in caplog.records)
+
+
+def test_retrieve_still_validates_k_at_least_one():
+    rag = _rag()
+    rag.ingest([_doc("a.txt", "alpha")])
+    with pytest.raises(RetrievalError):
+        rag.retrieve("alpha", k=0)
+
+
+def test_abstention_is_judged_on_dense_scores_not_the_rerankers():
+    """A real reranker's score is generally on its own, uncalibrated scale
+    (Jina's and the local cross-encoder's both are) — plan.md §18 F10's
+    ``min_score``/``min_gap`` floors are calibrated against the *embedder's*
+    scale, so ``query()`` must judge abstention on the dense hits, never on
+    whatever a reranker replaced their scores with."""
+    generator = FakeGenerator()
+
+    # A reranker that reports every hit as barely-relevant (0.01) must not
+    # make a genuinely good dense match abstain.
+    rag = _rag(
+        generator=generator,
+        min_score=0.1,
+        reranker=FakeReranker(score=lambda text: 0.01),
+    )
+    rag.ingest([_doc("a.txt", "alpha beta gamma")])
+    answer = rag.query("alpha beta gamma", k=1)
+    assert answer.insufficient_context is False
+    assert answer.contexts[0].score == pytest.approx(0.01)  # context still reranked
+
+    # A reranker that reports every hit as highly-relevant (0.99) must not
+    # rescue a genuinely poor dense match from abstaining.
+    rag2 = _rag(
+        generator=generator,
+        min_score=1.01,  # nothing on the dense (cosine) scale clears this
+        reranker=FakeReranker(score=lambda text: 0.99),
+    )
+    rag2.ingest([_doc("a.txt", "alpha beta gamma")])
+    assert rag2.query("alpha beta gamma", k=1).insufficient_context is True
 
 
 def test_query_is_reproducible_from_public_functions_alone(tmp_path):

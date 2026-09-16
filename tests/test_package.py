@@ -89,3 +89,27 @@ def test_generation_clients_are_resolved_lazily():
     assert generation.GeminiGenerator.__name__ == "GeminiGenerator"
     with pytest.raises(AttributeError):
         generation.NoSuchGenerator  # noqa: B018
+
+
+def test_rerankers_are_resolved_lazily():
+    import nanorag.rerank as rerank
+
+    assert rerank.JinaReranker.__name__ == "JinaReranker"
+    assert rerank.LocalCrossEncoderReranker.__name__ == "LocalCrossEncoderReranker"
+    with pytest.raises(AttributeError):
+        rerank.NoSuchReranker  # noqa: B018
+
+
+def test_pipeline_pulls_no_reranker_provider_or_model_runtime():
+    # plan.md §9 Phase F: the default IdentityReranker has no dependencies,
+    # so importing the pipeline must not pull httpx or fastembed just
+    # because rerank/base.py and rerank/identity.py are imported eagerly.
+    code = (
+        "import sys; from nanorag import Rag; "
+        "heavy = {'httpx', 'fastembed', 'onnxruntime'}; "
+        "print(sorted(heavy & set(sys.modules)))"
+    )
+    out = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, check=True
+    )
+    assert out.stdout.strip() == "[]", out.stdout

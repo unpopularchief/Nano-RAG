@@ -256,6 +256,86 @@ numbers in `CHANGELOG.md`. A floor is never lowered to make a red run
 green, and the corpus and items are never edited to fit a result: a
 changed corpus is a new dataset.
 
+## Reranking (Phase F, session F1)
+
+**Measured with `benchmarks/rerank_sweep.py`**, on the same committed
+corpus, thresholds and 128/64 chunker default as above — the identity row
+reproduces the baseline exactly, so every cross-encoder row's delta is
+directly comparable to it, not a second, differently-configured baseline.
+
+| reranker | retrieve_k | recall@1 | recall@5 | recall@10 | mrr | ndcg@5 | false_abstain | secs |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| identity (baseline) | — | 0.544 | 0.836 | 0.880 | 0.659 | 0.698 | 0.003 | 76 |
+| local cross-encoder | 8 | 0.699 | 0.861 | 0.880 | 0.771 | 0.792 | 0.003 | 117 |
+| local cross-encoder | 16 | 0.705 | 0.880 | 0.899 | 0.780 | 0.803 | 0.003 | 122 |
+| local cross-encoder | 32 | 0.721 | 0.912 | 0.937 | 0.802 | 0.827 | 0.003 | 145 |
+| local cross-encoder | 64 | 0.721 | 0.915 | 0.959 | 0.808 | 0.830 | 0.003 | 240 |
+
+**`LocalCrossEncoderReranker` (`Xenova/ms-marco-MiniLM-L-6-v2`, offline)
+beats the Phase D baseline by a wide, unambiguous margin** — `ndcg@5`
++0.129 (0.698 → 0.827) at `retrieve_k=32`, roughly **2.6× the 0.05
+tolerance band**, with every other gated metric improving alongside it.
+`recall@1` almost jumps a third (0.544 → 0.721): the cross-encoder scores
+each candidate against the actual question text rather than a single
+cosine number, and clearly resolves ties and near-misses dense retrieval
+cannot. **Gains grow with `retrieve_k` but visibly plateau**: 8 → 16 adds
++0.011 `ndcg@5`, 16 → 32 adds +0.024, 32 → 64 adds only +0.003 — for
+roughly 1.7× the reranking time (145 s → 240 s over 341 items). **32 is
+the picked oversampling factor**: it captures effectively all of the
+measured gain (0.827 of 0.830) at meaningfully lower cost than 64.
+
+**The abstention floor must be judged on the retriever's own dense
+scores, never the reranker's** — a real bug this sweep caught, not a
+theoretical concern. The first sweep run (before the fix) showed
+`false_abstain_rate` jump from 0.003 to 0.10–0.13 with the cross-encoder
+active: `insufficient_context()`'s `min_score`/`min_gap` floors are
+calibrated against the *embedder's* cosine scale (plan.md §18 F10,
+`docs/conventions.md` "Abstention"), and a cross-encoder's relevance
+score is a different, uncalibrated scale entirely — reusing it for the
+same floor made a third of genuinely on-topic queries look thin. Fixed in
+`Rag.query()` and `evaluate_retrieval()` (both now call
+`rag.retriever.retrieve()` directly for the abstention check, and
+`pipeline.rerank_hits()` — a new module-level function alongside
+`context_budget`/`insufficient_context`, plan.md §5 rule 1 — separately
+for the hits that actually go in the prompt): confirmed by the corrected
+sweep above, where every reranked row's `false_abstain_rate` matches the
+baseline's 0.003 exactly.
+
+**Not wired as `from_defaults()`'s default, despite clearing the
+Acceptance bar, for a reason the sweep didn't measure: model-load
+cost, not retrieval quality.** `LocalCrossEncoderReranker.__init__`
+eagerly loads its ONNX model, the same way `FastEmbedEmbedder` does — but
+`from_defaults()` builds one `Rag` for every CLI command, including
+`nanorag ingest`, which plan.md §4 states plainly needs no network at
+all. Defaulting the reranker on would make a bare `nanorag ingest` load
+(and, on a cold cache, download) a second ~80 MB model it will never use.
+Fixing this properly needs lazy reranker construction — the model loads
+on first `retrieve()`/`query()` call, not at `Rag()`/`from_defaults()`
+construction time — which is real, scoped-out follow-up work, not
+something to bundle silently into F1. **Until then, wire it in by hand**
+for the query path specifically:
+
+```python
+from nanorag.rerank import LocalCrossEncoderReranker
+
+rag = Rag.from_defaults(reranker=LocalCrossEncoderReranker(), retrieve_k=32)
+```
+
+`Rag()`'s own bare constructor default stays `IdentityReranker` regardless
+— a caller who wires every component by hand and never touches
+reranking must not suddenly need the `[local]` extra just because they
+constructed a `Rag`.
+
+**`JinaReranker` was built and unit-tested (via `MockTransport`) but not
+measured live** — no `JINA_API_KEY` was available this session, matching
+Gate D's Groq/Gemini situation. Its error mapping is inferred from the
+general Jina API shape, documented as such in `nanorag/rerank/jina.py`.
+Running the same head-to-head sweep against it, and comparing to the
+local cross-encoder within noise (plan.md §9 Phase F Acceptance: "the
+local cross-encoder is preferred... if it matches within noise"), is a
+named follow-up, not a Gate F blocker — the local cross-encoder's own
+result already stands on its own measured merit.
+
 ## Negative results and caveats
 
 - **Overlap at 256 tokens and above buys nothing measurable** (≤ 2 pp,

@@ -184,7 +184,7 @@ class ScoredChunk:
         more relevant; the scale is not comparable across sources.
     source
         Where the score came from: ``"dense"``, ``"bm25"``, ``"rerank:jina"``,
-        … — provenance for debugging a ranking.
+        ``"rerank:local"``, … — provenance for debugging a ranking.
 
     """
 

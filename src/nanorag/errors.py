@@ -17,6 +17,7 @@ Hierarchy
     ``StoreError``
         ``IndexModelMismatch``
     ``RetrievalError``
+    ``RerankError``
     ``GenerationError``
     ``EvaluationError``
     ``ProviderError``
@@ -128,6 +129,17 @@ class IndexModelMismatch(StoreError):
 
 class RetrievalError(NanoRagError):
     """Retrieval failed (bad filter grammar, empty index, dimension mismatch)."""
+
+
+class RerankError(NanoRagError):
+    """A reranker failed to re-score a candidate list.
+
+    A ``Reranker`` implementation that calls out to a model or a provider
+    (``JinaReranker``, ``LocalCrossEncoderReranker``) raises this — never a
+    raw provider error — so ``Rag.retrieve()`` can catch one narrow type and
+    degrade to the retriever's own order rather than failing the query
+    (plan.md §9 Phase F Tests).
+    """
 
 
 class GenerationError(NanoRagError):

@@ -7,6 +7,52 @@ breaking changes bump the minor).
 
 ## [Unreleased]
 
+### Added
+
+- **Phase F, session F1 — reranking.** New `rerank/` package behind a
+  `Reranker` protocol (`rerank(query, hits, top_n) -> list[ScoredChunk]`):
+  `IdentityReranker` (the default — a pure slice, no re-scoring, so `Rag`
+  behaves exactly as before Phase F until a reranker is wired in),
+  `JinaReranker` (the Jina Reranker API, unit-tested via `MockTransport`;
+  no `JINA_API_KEY` was available this session, so its error mapping is
+  inferred from the general API shape, not confirmed live, and it was not
+  part of the measured comparison), `LocalCrossEncoderReranker` (offline,
+  `fastembed`'s ONNX cross-encoders, `Xenova/ms-marco-MiniLM-L-6-v2` by
+  default). `Rag` gained `reranker=`/`retrieve_k=`: `k` is what a query
+  keeps, `retrieve_k` (defaults to `k`) is how many candidates the
+  retriever fetches before reranking. A reranker raising `RerankError`
+  degrades to the retriever's own order (logged at `WARNING`) rather than
+  failing the query. New `RerankError` in `errors.py`.
+- `benchmarks/rerank_sweep.py`, measuring a reranker against the same
+  committed corpus/thresholds the chunk-size sweep used, reusing one
+  embedded index across every row (see CHANGELOG entry below and
+  `docs/evaluation.md` "Reranking" for the numbers).
+
+### Changed
+
+- `nanorag.evaluation.build_rag` accepts `reranker=`/`retrieve_k=`,
+  passed straight through to `Rag`, so the eval harness can measure a
+  real reranker the same way a user would get it.
+
+### Fixed
+
+- **`insufficient_context()`'s abstention floor was being judged on
+  whatever `Rag.retrieve()` last returned — the reranked hits when a
+  reranker is active.** `min_score`/`min_gap` are calibrated against the
+  *embedder's* score scale (plan.md §18 F10); a reranker's score is
+  generally a different, uncalibrated one, so this silently mis-flagged
+  genuinely on-topic queries as insufficient the moment a real reranker
+  was wired in (found by the F1 measurement sweep: `false_abstain_rate`
+  jumped from 0.003 to 0.10–0.13 with the local cross-encoder active,
+  before this fix). `Rag.query()` and `nanorag.evaluation.runner.
+  evaluate_retrieval` now both fetch the retriever's dense hits
+  separately for the abstention check, reranking a copy for the actual
+  context / ranking metrics. New module-level `pipeline.rerank_hits()`
+  (alongside `context_budget`/`insufficient_context`, plan.md §5 rule 1)
+  shares the "rerank, degrade to dense order on `RerankError`" logic
+  between `Rag.retrieve()`, `Rag.query()` and the eval runner, so this
+  fix cannot silently drift out of sync between the two call sites again.
+
 ## [0.4.0] — 2026-09-17
 
 Phase E: re-ingesting a changed corpus is correct and cheap.

@@ -78,7 +78,53 @@ so a deletion is never visible in one but not the other. `sync_path()`
 (session E2) composes one level up: it classifies a directory walk against
 the store's current documents, then calls `ingest()` and `delete_document()`
 themselves for the actual writes — it owns no write path of its own, only
-the add/update/delete decision plus the delete-fraction guard.
+the add/update/delete decision plus the delete-fraction guard. `retrieve()`
+(Phase F, session F1) is the same shape again: it fetches from
+`self.retriever`, hands the result to `self.reranker`, and catches exactly
+one error type around that second call — a test reproduces it from
+`rag.retriever`/`rag.reranker` alone, same as `query()`.
+
+## Reranking (Phase F, session F1)
+
+- `Reranker` (`rerank/base.py`) is a `Protocol`: `rerank(query, hits, top_n)
+  -> list[ScoredChunk]`. `IdentityReranker` (a pure slice, no re-scoring) and
+  `JinaReranker` are the two implementations the protocol is written at
+  (plan.md §15 #1); `LocalCrossEncoderReranker` is a third.
+  `IdentityReranker` is `Rag`'s default, so a caller who never touches
+  reranking sees behaviour byte-identical to before Phase F.
+- **retrieve-k / rerank-to-n**: `Rag.k` is what a query keeps; `Rag.retrieve_k`
+  (defaults to `Rag.k`) is how many candidates the retriever fetches before
+  reranking. A per-call `k` that exceeds `retrieve_k` still gets a
+  correctly-sized candidate pool — `retrieve()` fetches
+  `max(retrieve_k, k)`, never fewer than what was asked for.
+  `retrieve_k`/`k` are the same value with the identity reranker (no
+  oversampling needed for a no-op), so they cost nothing until a real
+  reranker is wired in.
+- **A reranker never fails the query.** `Reranker` implementations raise
+  `RerankError` (never a raw provider or model exception) for any failure;
+  `Rag.retrieve()` catches exactly that type and falls back to the
+  retriever's own order, logging a `WARNING`. An HTTP-backed reranker
+  (`JinaReranker`) translates its own `ProviderError` into `RerankError` at
+  the `rerank()` boundary — the pipeline's catch stays narrow and generic.
+- **Enabled by default only if it beats the Phase D baseline** (plan.md §9
+  Phase F Acceptance) — measured with `benchmarks/rerank_sweep.py` against
+  the same committed corpus and thresholds the chunk-size sweep used.
+  Every delta, including a negative one, is recorded in
+  `docs/evaluation.md`, not just the winning configuration. F1's
+  `LocalCrossEncoderReranker` clears this bar by a wide margin but is
+  *not* wired into `from_defaults()`'s default: it loads its model
+  eagerly at construction, and `from_defaults()` also builds the `Rag`
+  behind `nanorag ingest`, which must stay network-free (plan.md §4).
+  Wiring it in safely needs lazy reranker construction — a named
+  follow-up, not part of F1 — so today it is opt-in
+  (`docs/evaluation.md` "Reranking" has the one-liner).
+- **Abstention is judged on the retriever's dense hits, never the
+  reranked ones** — `min_score`/`min_gap` are calibrated against the
+  embedder's score scale (F10), which a reranker's score generally is
+  not. `Rag.query()` and `evaluate_retrieval()` both fetch the dense hits
+  separately for this check and rerank a copy for the actual context/
+  ranking metrics; a real bug found by the F1 sweep before this fix
+  landed, not a hypothetical.
 
 ## Public types
 

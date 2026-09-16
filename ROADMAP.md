@@ -12,7 +12,7 @@ contiguous release list.
 | **C — First answers (MVP)** | `v0.1.0` | Documents in, cited answer out — free key or fully offline. First public release. | **done — `v0.1.0`, Gate C passed** |
 | **D — Trust** | `v0.3.0` | Citations resolving to text spans, a CLI, quality as numbers in CI (≥ 200-item eval set). | **done — `v0.3.0`, Gate D passed** |
 | **E — Durability** | `v0.4.0` | Re-ingesting a changed corpus is correct and cheap. | **done — `v0.4.0`, Gate E passed** |
-| **F — Quality** | `v0.6.0` | Beat the Phase D baseline with evidence — reranking, BM25/hybrid, MMR. Negative results published. | not started |
+| **F — Quality** | `v0.6.0` | Beat the Phase D baseline with evidence — reranking, BM25/hybrid, MMR. Negative results published. | F1 done — F2, F3 next |
 | **G — Reach** | `v0.7.0` | PDF/HTML loaders, external stores (Qdrant, pgvector), hosted embeddings — without touching the core. | not started |
 | **H — Production** | `v1.0.0` | Structured logging, cost accounting, deployment guide, threat model, API freeze. | not started |
 
@@ -311,6 +311,51 @@ contiguous release list.
   rather than a second cold pass, which would have doubled `eval.yml`'s
   CI runtime): every metric came back bit-identical. See CHANGELOG
   `[0.4.0]` for the full list.
+
+## Phase F sessions
+
+- **F1** ✅ — `rerank/`: `base.py` (the `Reranker` protocol — `rerank(query,
+  hits, top_n) -> list[ScoredChunk]`), `identity.py` (`IdentityReranker`,
+  the default — a pure slice, no re-scoring), `jina.py` (`JinaReranker`,
+  the Jina Reranker API, unit-tested via `MockTransport` — no
+  `JINA_API_KEY` was available this session, so its error mapping is
+  inferred from the general API shape, not confirmed live, and it was not
+  part of the measured comparison below), `local_cross_encoder.py`
+  (`LocalCrossEncoderReranker`, offline via `fastembed`'s ONNX
+  cross-encoders, `Xenova/ms-marco-MiniLM-L-6-v2` by default). `Rag` gained
+  `reranker=`/`retrieve_k=`: `k` is what a query keeps, `retrieve_k`
+  (defaults to `k`) is how many candidates the retriever fetches before
+  reranking — "retrieve wide, keep narrow." A reranker that raises
+  `RerankError` degrades to the retriever's own order (logged at
+  `WARNING`) rather than failing the query.
+  - **Measured against the real committed corpus/thresholds**
+    (`benchmarks/rerank_sweep.py`, `docs/evaluation.md` "Reranking"): the
+    local cross-encoder clears the Phase F Acceptance bar by a wide
+    margin — `ndcg@5` 0.698 → 0.827 at `retrieve_k=32` (≈ 2.6× the 0.05
+    tolerance band), `recall@1` 0.544 → 0.721 — with gains plateauing
+    between `retrieve_k=32` and `64` (+0.003 `ndcg@5` for 1.7× the
+    reranking time), which is why 32 was picked.
+  - **A real bug found and fixed by the sweep, not a hypothetical**:
+    `insufficient_context()`'s `min_score`/`min_gap` floors are
+    calibrated against the *embedder's* score scale (F10); reusing a
+    reranker's differently-scaled score for the same check silently
+    inflated `false_abstain_rate` from 0.003 to 0.10–0.13 in the first
+    (uncorrected) run. Fixed in `Rag.query()` and `evaluate_retrieval()`
+    to judge abstention on the retriever's dense hits always, reranking a
+    separate copy for the actual context/ranking metrics; new
+    module-level `pipeline.rerank_hits()` shares the "rerank, degrade on
+    failure" logic between `Rag.retrieve()`, `Rag.query()` and the eval
+    runner (plan.md §5 rule 1). Confirmed by the corrected sweep: every
+    reranked row's `false_abstain_rate` now matches the baseline exactly.
+  - **Not wired into `Rag.from_defaults()`'s default**, despite clearing
+    the bar: `LocalCrossEncoderReranker` loads its ONNX model eagerly at
+    construction, and `from_defaults()` also builds the `Rag` behind
+    `nanorag ingest`, which plan.md §4 requires to stay network-free.
+    Flipping the default safely needs lazy reranker construction (load on
+    first `retrieve()`/`query()`, not at `Rag()`/`from_defaults()` time) —
+    a named follow-up, scoped out of F1 rather than silently deferred.
+    `Rag()`'s own bare default stays `IdentityReranker` (zero
+    dependencies) either way.
 
 ## Out of scope through 1.0
 

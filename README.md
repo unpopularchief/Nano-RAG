@@ -7,7 +7,8 @@ afternoon, run it against your own documents, and operate it for free.
 > **Status: `v0.4.0` — Phase D and Phase E are done and Gate D/Gate E have
 > both closed: citations resolve to text spans, there's a command line,
 > quality is a number enforced in CI, and re-ingesting a changed corpus is
-> correct and cheap.** The package installs, lints, type-checks,
+> correct and cheap. Phase F (quality — reranking, hybrid retrieval, MMR)
+> is underway, session F1 done.** The package installs, lints, type-checks,
 > tests and builds a wheel on Linux and Windows. It loads real files
 > (`loaders/`), cleans and chunks them (`cleaning/`, `chunking/`), embeds
 > them locally (`embeddings/` — `fastembed`/ONNX, no torch, cached and
@@ -43,8 +44,18 @@ afternoon, run it against your own documents, and operate it for free.
 > review verified both Phase E acceptance criteria literally: no orphan
 > rows in any table after a combined add/edit/delete cycle, and the Phase
 > D eval numbers are bit-identical before and after resyncing the real
-> committed corpus unedited. See [`plan.md`](plan.md) §9 for the phased
-> roadmap and [`ROADMAP.md`](ROADMAP.md) for the condensed version.
+> committed corpus unedited. **Phase F (quality) is underway** — session
+> F1 added `rerank/`: `IdentityReranker` (the default, a pure slice —
+> `Rag` behaves exactly as before Phase F until a reranker is wired in),
+> `JinaReranker` and `LocalCrossEncoderReranker` (offline, via
+> `fastembed`'s ONNX cross-encoders), plus `retrieve_k`/`k` "retrieve wide,
+> keep narrow" wiring on `Rag`. **Measured**: the local cross-encoder
+> beats the Phase D baseline by a wide margin (`ndcg@5` 0.698 → 0.827,
+> `recall@1` 0.544 → 0.721) — see [`docs/evaluation.md`](docs/evaluation.md)
+> "Reranking" for the numbers, why it is not (yet) `from_defaults()`'s
+> default, and the one-liner to opt in today. See [`plan.md`](plan.md) §9
+> for the phased roadmap and [`ROADMAP.md`](ROADMAP.md) for the condensed
+> version.
 
 ## What it will be
 

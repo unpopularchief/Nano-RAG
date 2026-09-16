@@ -47,7 +47,8 @@ from nanorag.evaluation.retrieval_metrics import (
 )
 from nanorag.generation.base import Generator
 from nanorag.generation.null import NullGenerator
-from nanorag.pipeline import Rag, insufficient_context
+from nanorag.pipeline import Rag, insufficient_context, rerank_hits
+from nanorag.rerank.base import Reranker
 from nanorag.store.sqlite_docs import SqliteDocumentStore
 from nanorag.tokens import TokenCounter
 
@@ -68,12 +69,18 @@ def build_rag(
     counter: TokenCounter | None = None,
     k: int = max(DEFAULT_KS),
     min_score: float | None = None,
+    reranker: Reranker | None = None,
+    retrieve_k: int | None = None,
 ) -> Rag:
     """Ingest *dataset*'s corpus into a fresh in-memory ``Rag``.
 
     *generator* defaults to a :class:`~nanorag.generation.NullGenerator` —
     enough for :func:`evaluate_retrieval`; :func:`evaluate_answers` needs a
-    real one. Everything else is passed straight to ``Rag``.
+    real one. *reranker*/*retrieve_k* default to ``Rag``'s own defaults
+    (identity, no oversampling) — passed through so the Phase F reranking
+    sweep (``benchmarks/rerank_sweep.py``) can measure a real reranker
+    against the same harness the committed thresholds were measured with.
+    Everything else is passed straight to ``Rag``.
     """
     rag = Rag(
         embedder=embedder,
@@ -83,6 +90,8 @@ def build_rag(
         counter=counter,
         k=k,
         min_score=min_score,
+        reranker=reranker,
+        retrieve_k=retrieve_k,
     )
     rag.ingest(dataset.documents)
     return rag
@@ -98,6 +107,13 @@ def evaluate_retrieval(
     share ``insufficient_context`` flagged under ``rag``'s thresholds).
     Unanswerable items yield only ``abstain_rate`` (the share flagged).
     Every aggregate is a plain mean over its population.
+
+    Ranking metrics (recall/precision/hit-rate/mrr/ndcg) are graded on
+    ``rag``'s full read path including reranking — that is the point of
+    measuring a reranker's effect at all. Abstention is graded on the
+    retriever's own dense hits, matching ``Rag.query()`` exactly (plan.md
+    §18 F10: the floor is calibrated against the embedder's score scale,
+    which a reranker's score generally is not).
     """
     if not ks or any(k < 1 for k in ks):
         raise ValueError(f"ks must be non-empty positive integers, got {ks!r}")
@@ -109,9 +125,10 @@ def evaluate_retrieval(
     flagged_unanswerable: list[float] = []
 
     for item in dataset.items:
-        hits = rag.retrieve(item.question, k=k_max)
+        dense_hits = rag.retriever.retrieve(item.question, k=max(rag.retrieve_k, k_max))
+        hits = rerank_hits(rag.reranker, item.question, dense_hits, k_max)
         flagged = insufficient_context(
-            hits,
+            dense_hits[:k_max],
             min_results=rag.min_results,
             min_gap=rag.min_gap,
             min_score=rag.min_score,

@@ -10,19 +10,21 @@ no real clock (plan.md §12).
   was handed.
 - ``FakeClock`` — advances only when told; ``sleep`` records the request
   instead of blocking.
+- ``FakeReranker`` — a ``Reranker`` (plan.md §9 Phase F) that re-scores by a
+  scripted function, or raises a scripted error, and records every call.
 """
 
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 import numpy as np
 
 from nanorag.generation.base import Generation
 from nanorag.hashing import normalize_text
 from nanorag.prompting.templates import Prompt
-from nanorag.types import Usage
+from nanorag.types import ScoredChunk, Usage
 
 
 class FakeEmbedder:
@@ -164,3 +166,55 @@ class FakeClock:
         if seconds < 0:
             raise ValueError("cannot move the clock backwards")
         self._now += seconds
+
+
+class FakeReranker:
+    """A ``Reranker`` (plan.md §9 Phase F) that re-scores by a scripted function.
+
+    Satisfies ``nanorag.rerank.base.Reranker``. Every call is recorded as
+    ``(query, len(hits), top_n)`` so a test can assert what a caller (e.g.
+    ``Rag.retrieve``) actually passed in.
+
+    Parameters
+    ----------
+    score
+        Called as ``score(chunk_text) -> float`` per hit to produce this
+        reranker's own score, replacing the hit's original one. Defaults to
+        the negative of each hit's index, which visibly reverses input order
+        — a fake rerank should never look like a no-op.
+    error
+        If set, raised on every call instead of scoring — how a "reranker
+        failure degrades to dense order" test drives the failure.
+    """
+
+    def __init__(
+        self,
+        score: Callable[[str], float] | None = None,
+        *,
+        error: Exception | None = None,
+    ) -> None:
+        self._score = score
+        self.error = error
+        self.calls: list[tuple[str, int, int]] = []
+
+    def rerank(
+        self, query: str, hits: list[ScoredChunk], top_n: int
+    ) -> list[ScoredChunk]:
+        """Record the call; re-score and reorder *hits*, or raise ``self.error``."""
+        self.calls.append((query, len(hits), top_n))
+        if self.error is not None:
+            raise self.error
+        if self._score is not None:
+            rescored = [
+                ScoredChunk(
+                    chunk=h.chunk, score=self._score(h.chunk.text), source="rerank:fake"
+                )
+                for h in hits
+            ]
+        else:
+            rescored = [
+                ScoredChunk(chunk=h.chunk, score=float(-i), source="rerank:fake")
+                for i, h in enumerate(hits)
+            ]
+        rescored.sort(key=lambda h: h.score, reverse=True)
+        return rescored[:top_n]

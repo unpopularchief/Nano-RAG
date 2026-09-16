@@ -24,7 +24,7 @@ from nanorag.evaluation import (
 )
 from nanorag.prompting import INSUFFICIENT_CONTEXT_TEXT
 from nanorag.tokens import HeuristicCounter
-from tests.fakes import FakeEmbedder, FakeGenerator
+from tests.fakes import FakeEmbedder, FakeGenerator, FakeReranker
 
 CORPUS = {
     "cats.md": "Cats sleep most of the day.\n\nA cat purrs when it is content.\n",
@@ -134,6 +134,29 @@ def test_retrieval_run_measures_the_abstention_floor(dataset):
     assert report.metrics["abstain_rate"] == 1.0
     assert report.metrics["false_abstain_rate"] == 0.0
     assert report.config["min_score"] == 0.1
+
+
+def test_retrieval_run_judges_abstention_on_dense_scores_not_a_rerankers(dataset):
+    """plan.md §18 F10: the abstention floor is calibrated against the
+    embedder's score scale. A reranker that reports every hit as
+    barely-relevant must not inflate ``false_abstain_rate`` for a
+    genuinely on-topic query — this is the same fix ``Rag.query()`` needs,
+    and the eval gate must measure it the same way or its own numbers
+    would misrepresent what a user actually gets."""
+    plain = evaluate_retrieval(dataset, _rag(dataset, min_score=0.1), ks=(1,))
+
+    reranked = evaluate_retrieval(
+        dataset,
+        _rag(dataset, min_score=0.1, reranker=FakeReranker(score=lambda text: 0.01)),
+        ks=(1,),
+    )
+
+    assert reranked.metrics["false_abstain_rate"] == plain.metrics["false_abstain_rate"]
+    assert reranked.metrics["abstain_rate"] == plain.metrics["abstain_rate"]
+    # The reranked score still shows up in the report row (context is
+    # reranked); it just never drove the abstention decision above.
+    rows = {row["id"]: row for row in reranked.items}
+    assert rows["two-spans"]["top_score"] == pytest.approx(0.01)
 
 
 def test_retrieval_run_over_one_population_omits_the_other_rate(dataset):

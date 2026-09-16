@@ -41,7 +41,7 @@ second client for Gemini's own schema.
 | **Primary** | Groq — `openai/gpt-oss-120b` | ~30 RPM, ~1K req/day, no card. Returns `Retry-After` on 429. | See Groq's current terms. |
 | **Fallback** | Gemini Flash | Generous free tier. Used when Groq's daily cap is hit. | **Google's free tier may train on submitted prompts.** Paid does not. |
 | **Offline** | Ollama — `qwen2.5:7b-instruct` or `llama3.1:8b` | Local, unlimited. Q4_K_M ≈ 4.7 GB weights + ~2 GB KV → fits 8 GB VRAM at 8–16k context. | Nothing leaves the machine. **The fully-private path.** |
-| **Rerank** (Phase F) | Jina `jina-reranker-v2-base-multilingual`, or a local ONNX cross-encoder | 1M tokens free, 100 RPM. | **Non-commercial key.** The local cross-encoder keeps the pipeline offline. |
+| **Rerank** (default: none) | Identity (no-op) by default; `LocalCrossEncoderReranker` (offline) or `JinaReranker` (`jina-reranker-v2-base-multilingual`) opt-in | Local cross-encoder: none needed. Jina: 1M tokens free, 100 RPM. | Local cross-encoder: nothing leaves the machine. Jina: **non-commercial key.** |
 
 Local Ollama models have far smaller context windows than the API models — the
 token budget is read from the generator, never hard-coded.
@@ -121,3 +121,27 @@ the generator's real tokenizer as `counter=`, or raise `budget_margin`).
 **Ollama serves every model with a fixed 4096-token context by default**
 (`OLLAMA_CONTEXT_LENGTH`), whatever the model card says — the `OLLAMA`
 preset assumes exactly that; override `context_window=` if you raised it.
+
+## Reranking
+
+Off by default (`Rag`'s `IdentityReranker`) — a caller who never touches
+`reranker=`/`retrieve_k=` sees behaviour byte-identical to before Phase F.
+Two opt-in implementations:
+
+- **`nanorag.rerank.LocalCrossEncoderReranker`** — offline, via `fastembed`'s
+  ONNX cross-encoders (the `[local]` extra, already needed for the default
+  embedder). Default model `Xenova/ms-marco-MiniLM-L-6-v2` (~80 MB) —
+  deliberately small; the 8 GB VRAM ceiling is reserved for generation, not
+  reranking either. Nothing leaves the machine.
+- **`nanorag.rerank.JinaReranker`** — `jina-reranker-v2-base-multilingual`
+  via the Jina Reranker API. 1M tokens free, 100 RPM, a **non-commercial
+  key** (`JINA_API_KEY`). Its error mapping (`docs/conventions.md`) is
+  inferred from the general Jina API shape, not confirmed against a live
+  key — no `JINA_API_KEY` was available when it was built, so the live
+  head-to-head measurement `benchmarks/rerank_sweep.py` reports is the
+  local cross-encoder against the identity baseline only (see
+  `docs/evaluation.md` for the numbers and the resulting default decision).
+
+Pass either as `Rag(reranker=..., retrieve_k=...)`; `retrieve_k` (candidates
+fetched before reranking) should be wider than `k` (what a query keeps) for
+a real reranker to have anything meaningful to choose from.
