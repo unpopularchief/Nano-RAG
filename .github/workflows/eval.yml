@@ -1,0 +1,38 @@
+name: Eval gate
+
+# The Phase D regression gate (plan.md §9 D3, §12): the committed dataset
+# through the real embedder, checked against the committed thresholds in
+# datasets/nanorag-docs/thresholds.json. Runs nightly and on demand, on ONE
+# fixed runner image rather than the CI matrix — ONNX Runtime drifts a little
+# across builds and CPUs, which is what the tolerance band absorbs (plan.md
+# §18 F3, F5); spreading it over six cells would only add noise. Offline
+# after the cached model download; no API key anywhere.
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+jobs:
+  eval:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Cache fastembed models
+        uses: actions/cache@v4
+        with:
+          path: /tmp/fastembed_cache
+          key: fastembed-models-v1-${{ hashFiles('src/nanorag/embeddings/local.py') }}
+
+      - name: Install dependencies
+        run: uv sync --extra dev --extra local --python 3.12
+
+      - name: Retrieval eval against committed thresholds
+        run: uv run pytest -q -m eval -s

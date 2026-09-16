@@ -1,16 +1,16 @@
 # Command line
 
-`nanorag ingest | query | inspect | eval` — the library's read and write
-paths, and its evaluation harness, as a command. Installed as the `nanorag`
-console script by the package (`uv run nanorag …` inside this repository);
-also runnable as `python -m nanorag.cli`.
+`nanorag ingest | query | inspect` — the library's read and write paths as a
+command, nothing more. Installed as the `nanorag` console script by the
+package (`uv run nanorag …` inside this repository); also runnable as
+`python -m nanorag.cli`. `nanorag eval` arrives with the evaluation harness
+(Phase D, session D3).
 
 ```bash
 nanorag ingest docs/ --glob "**/*.md"          # offline: local embeddings, no key
 nanorag query "Where do API keys come from?"   # one generation call
 nanorag query "…" --json | jq .answer.citations
 nanorag inspect                                # what the index holds; loads no model
-nanorag eval datasets/nanorag-docs/dev.jsonl   # offline retrieval eval; --thresholds gates
 ```
 
 ## Contract
@@ -30,9 +30,6 @@ nanorag eval datasets/nanorag-docs/dev.jsonl   # offline retrieval eval; --thres
   | `3` | configuration: no generator available, the `[local]` extra missing, an unknown profile or setting | `ConfigError` |
   | `4` | the provider: rejected key, spent quota, rate limit or transient failure that survived the retries and the fallback chain, retired model | `ProviderError` and subclasses |
   | `5` | the store: index built with a different embedding model, no index to inspect | `StoreError`, `IndexModelMismatch` |
-  | `6` | `eval --thresholds` only: a metric fell below a committed threshold (the report is still printed) | |
-
-  A malformed dataset or thresholds file (`EvaluationError`) exits `1`.
 
   An exception that is not a `NanoRagError` is a bug and propagates with its
   traceback (the interpreter exits `1`).
@@ -173,61 +170,6 @@ nothing is created.
 
 `index` is `null` until the first embeddings are written. `sources` is
 ordered by `source_uri`.
-
-## `nanorag eval DATASET.jsonl`
-
-Grade the pipeline on a frozen dataset (`docs/evaluation.md` has the
-metrics, `datasets/nanorag-docs/README.md` the format). By default a
-**retrieval** run — the corpus is embedded locally into an in-memory index
-(the embedding cache under `--persist-dir` makes a repeat, or a chunk-size
-sweep, cheap), every question is retrieved and the ranking graded against
-the gold spans. Offline and keyless. With `--answers` it becomes an
-**answer** run: one generation call per item through the configured
-generator.
-
-| Option | Effect |
-| --- | --- |
-| `--corpus DIR` | the corpus directory (default `corpus/` next to `DATASET`) |
-| `--ks K,K,…` | cut-offs to report (default `1,3,5,10`) |
-| `--chunk-tokens N`, `--overlap-tokens N` | the `RecursiveChunker` to grade (default: the library defaults) |
-| `--min-score X` | the abstention floor (default: the measured floor for the default embedder, none for any other) |
-| `--thresholds FILE` | check the report against a `thresholds.json`; a regression exits `6` |
-| `--answers` | answer run instead of retrieval; `-k N` chunks per query, `--generator` picks the provider |
-
-```json
-{
-  "report": {
-    "dataset": "nanorag-docs",
-    "kind": "retrieval",
-    "config": {"embedder": "BAAI/bge-base-en-v1.5", "dim": 768,
-               "chunker": "RecursiveChunker", "target_tokens": 128, "overlap_tokens": 64,
-               "chunks": 839, "min_score": 0.55, "min_gap": 0.0, "ks": [1, 3, 5, 10]},
-    "n_items": 341,
-    "n_answerable": 317,
-    "metrics": {"mrr": 0.659, "recall@1": 0.544, "precision@1": 0.546, "hit_rate@1": 0.546,
-                "ndcg@1": 0.546, "recall@5": 0.836, "…": "…",
-                "false_abstain_rate": 0.003, "abstain_rate": 0.417},
-    "items": [
-      {"id": "readme-011", "answerable": true, "tags": ["readme", "generation"],
-       "top_score": 0.71, "flagged_insufficient": false, "retrieved": ["…"],
-       "first_relevant_rank": 1, "metrics": {"mrr": 1.0, "recall@1": 1.0, "…": "…"}}
-    ]
-  },
-  "thresholds": {"path": "datasets/nanorag-docs/thresholds.json", "passed": true,
-                 "violations": []}
-}
-```
-
-`thresholds` is `null` without `--thresholds`; a violation is
-`{"metric", "value", "floor", "baseline"}`. An answer run's `config` adds
-`generator`, `model` and `k`; its `metrics` are `answer_rate`,
-`abstain_rate`, `cited_rate`, `citation_validity`, `citation_precision`,
-`token_f1`, `mean_total_tokens`, `mean_generate_ms` and `completed_rate`
-(an answer run records a provider failure on the item and carries on, and
-stops after a `QuotaExhausted`, an `AuthError` or ten failures in a row —
-so a rate-limited free tier still yields a report over what completed);
-each item row carries the answer `text`, its `citations`, provider and
-tokens, or an `error`.
 
 ## Schema stability
 

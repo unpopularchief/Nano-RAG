@@ -16,7 +16,9 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from nanorag.chunking.base import (
+    DEFAULT_OVERLAP_TOKENS,
     DEFAULT_SEPARATORS,
+    DEFAULT_TARGET_TOKENS,
     atomic_spans,
     default_counter,
     make_chunk,
@@ -95,8 +97,8 @@ class MarkdownChunker:
     def __init__(
         self,
         *,
-        target_tokens: int = 512,
-        overlap_tokens: int = 64,
+        target_tokens: int = DEFAULT_TARGET_TOKENS,
+        overlap_tokens: int = DEFAULT_OVERLAP_TOKENS,
         separators: Sequence[str] = DEFAULT_SEPARATORS,
         counter: TokenCounter | None = None,
     ) -> None:

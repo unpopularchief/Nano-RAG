@@ -1,0 +1,6 @@
+{
+  "recall@5": {"baseline": 0.836, "tolerance": 0.05},
+  "recall@10": {"baseline": 0.880, "tolerance": 0.05},
+  "mrr": {"baseline": 0.659, "tolerance": 0.05},
+  "ndcg@5": {"baseline": 0.698, "tolerance": 0.05}
+}

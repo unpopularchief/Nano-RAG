@@ -7,7 +7,10 @@ The two rules that keep this from becoming a framework (plan.md §5):
    generate — every one of which a caller can invoke directly. The three
    pieces of arithmetic it needs (:func:`context_budget`,
    :func:`insufficient_context`, :func:`load_vectors`) are module-level
-   functions here, not methods, for the same reason.
+   functions here, not methods, for the same reason — as are the three
+   ``from_defaults()`` choices (:func:`default_embedder`,
+   :func:`default_min_score`, :func:`default_generator`), so an eval run
+   or a CLI command can wire exactly what a user would get.
 2. **Protocols, not base classes.** Every component is duck-typed:
    ``Rag(embedder=..., generator=..., docs=...)`` accepts anything with the
    right shape.
@@ -173,6 +176,44 @@ def load_vectors(docs: SqliteDocumentStore, dim: int) -> NumpyVectorStore:
     if ids:
         vectors.upsert(ids, np.stack(rows))
     return vectors
+
+
+def default_embedder(settings: Settings, root: str | Path) -> Embedder:
+    """Build the embedder ``from_defaults()`` wires: local ONNX, batched, cached.
+
+    ``FastEmbedEmbedder(settings.embedding_model)`` inside a
+    ``BatchingEmbedder`` (``settings.embed_batch_size``) inside a
+    ``CachingEmbedder`` whose cache lives at ``root/embeddings.sqlite`` —
+    so a re-ingest, or an eval sweep over chunk sizes, re-embeds only text
+    it has never seen (plan.md §5).
+
+    Raises
+    ------
+    ConfigError
+        The ``[local]`` extra is missing, or the model id is unknown to
+        ``fastembed`` — each names the fix.
+
+    """
+    from nanorag.embeddings.batching import BatchingEmbedder
+    from nanorag.embeddings.cache import CachingEmbedder, EmbeddingCache
+    from nanorag.embeddings.local import FastEmbedEmbedder
+
+    local = FastEmbedEmbedder(settings.embedding_model)
+    return CachingEmbedder(
+        BatchingEmbedder(local, batch_size=settings.embed_batch_size),
+        EmbeddingCache(Path(root) / "embeddings.sqlite"),
+    )
+
+
+def default_min_score(embedding_model: str) -> float | None:
+    """Return the :func:`insufficient_context` floor measured for *embedding_model*.
+
+    :data:`DEFAULT_MIN_SCORE` for the default embedder, else ``None`` — the
+    scale is the embedder's, and no other model has been measured.
+    """
+    from nanorag.embeddings.local import DEFAULT_MODEL_ID
+
+    return DEFAULT_MIN_SCORE if embedding_model == DEFAULT_MODEL_ID else None
 
 
 def default_generator(
@@ -384,21 +425,12 @@ class Rag:
             — each names the fix.
 
         """
-        from nanorag.embeddings.batching import BatchingEmbedder
-        from nanorag.embeddings.cache import CachingEmbedder, EmbeddingCache
-        from nanorag.embeddings.local import DEFAULT_MODEL_ID, FastEmbedEmbedder
-
         if settings is None:
             settings = Settings.load()
         root = Path(persist_dir if persist_dir is not None else settings.persist_dir)
         root.mkdir(parents=True, exist_ok=True)
-        local = FastEmbedEmbedder(settings.embedding_model)
-        if settings.embedding_model == DEFAULT_MODEL_ID:
-            kwargs.setdefault("min_score", DEFAULT_MIN_SCORE)
-        embedder = CachingEmbedder(
-            BatchingEmbedder(local, batch_size=settings.embed_batch_size),
-            EmbeddingCache(root / "embeddings.sqlite"),
-        )
+        embedder = default_embedder(settings, root)
+        kwargs.setdefault("min_score", default_min_score(settings.embedding_model))
         if generator is None:
             generator = default_generator(settings)
         return cls(

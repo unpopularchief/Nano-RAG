@@ -18,6 +18,7 @@ Hierarchy
         ``IndexModelMismatch``
     ``RetrievalError``
     ``GenerationError``
+    ``EvaluationError``
     ``ProviderError``
         ``AuthError``
         ``RateLimitError``   (carries ``retry_after``)
@@ -131,6 +132,10 @@ class RetrievalError(NanoRagError):
 
 class GenerationError(NanoRagError):
     """Answer generation failed for a reason not attributable to a provider."""
+
+
+class EvaluationError(NanoRagError):
+    """An eval dataset, threshold file or report is malformed (Phase D)."""
 
 
 class ProviderError(NanoRagError):

@@ -29,42 +29,6 @@ breaking changes bump the minor).
   first `generate`. `Rag.from_defaults(generator=NullGenerator())` builds
   an index without reading a key or probing Ollama.
 - `SqliteDocumentStore.count_documents()` / `count_chunks(doc_id=None)`.
-- `evaluation/` (Phase D, session D3): `datasets.py` (a frozen corpus +
-  `dev.jsonl` items whose gold is a verbatim quote resolved to character
-  offsets — missing or ambiguous quotes fail loudly), `retrieval_metrics.py`
-  (Recall/Precision/hit-rate@k, MRR, nDCG@k with novelty gains),
-  `answer_metrics.py` (citation validity, citation precision against gold,
-  abstention, SQuAD token-F1), `runner.py` (`build_rag`,
-  `evaluate_retrieval` — offline; `evaluate_answers` — one generation call
-  per item, provider failures recorded per item, the run stops on
-  `QuotaExhausted`/`AuthError` or ten consecutive failures and reports
-  `completed_rate`), `report.py` (`EvalReport`, `load_thresholds`,
-  `check_thresholds`). New `EvaluationError`.
-- `datasets/nanorag-docs/`: 19 frozen documents and 341 hand-written
-  items (317 answerable, 24 unanswerable) with committed `thresholds.json`
-  (Recall@5 0.836, Recall@10 0.880, MRR 0.659, nDCG@5 0.698, tolerance
-  0.05 ≈ 2 SE at n = 317). Third-party READMEs attributed in its README.
-- `nanorag eval DATASET.jsonl` (`cli/eval.py`): retrieval or `--answers`
-  runs, `--chunk-tokens/--overlap-tokens/--min-score/--ks`, `--thresholds`
-  exits 6 on a regression. `tests/test_eval_gate.py` (`-m eval`) and
-  `.github/workflows/eval.yml` (nightly + manual, `ubuntu-24.04`, offline)
-  are the CI gate. `benchmarks/eval_sweep.py` runs the chunk-size ×
-  overlap × model sweep. `pipeline.default_embedder()` /
-  `default_min_score()` factored out of `from_defaults()` so the eval
-  wires exactly what a user gets.
-
-### Changed
-
-- **Chunker defaults: `target_tokens=128, overlap_tokens=64`** (was 512 /
-  64) on `RecursiveChunker`, `FixedChunker` and `MarkdownChunker`, as
-  `DEFAULT_TARGET_TOKENS` / `DEFAULT_OVERLAP_TOKENS` in `chunking/base.py`.
-  Picked by the D3 sweep (`docs/evaluation.md`): 128/64 retrieves the most
-  gold at every cut-off (Recall@5 0.836 vs 0.694, MRR 0.659 vs 0.529) and
-  a 7B local model answers 92 % of answerable questions instead of 79 %
-  with higher citation precision on half the prompt. Existing indexes keep
-  working; the next ingest re-chunks (and, since the embedding cache is
-  keyed by text, re-embeds) each document. Tokens are counted by the
-  chunker's own heuristic counter, so 128 ≈ 512 characters.
 
 ### Fixed
 

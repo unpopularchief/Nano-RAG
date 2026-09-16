@@ -14,7 +14,9 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from nanorag.chunking.base import (
+    DEFAULT_OVERLAP_TOKENS,
     DEFAULT_SEPARATORS,
+    DEFAULT_TARGET_TOKENS,
     atomic_spans,
     default_counter,
     make_chunk,
@@ -33,7 +35,9 @@ class RecursiveChunker:
     Parameters
     ----------
     target_tokens
-        Maximum tokens per chunk. Must be >= 1.
+        Maximum tokens per chunk. Must be >= 1. The default,
+        :data:`~nanorag.chunking.base.DEFAULT_TARGET_TOKENS`, was picked by
+        measurement (Phase D3).
     overlap_tokens
         Tokens of overlap between consecutive chunks. Must be ``0 <=
         overlap_tokens < target_tokens``.
@@ -55,8 +59,8 @@ class RecursiveChunker:
     def __init__(
         self,
         *,
-        target_tokens: int = 512,
-        overlap_tokens: int = 64,
+        target_tokens: int = DEFAULT_TARGET_TOKENS,
+        overlap_tokens: int = DEFAULT_OVERLAP_TOKENS,
         separators: Sequence[str] = DEFAULT_SEPARATORS,
         counter: TokenCounter | None = None,
     ) -> None:

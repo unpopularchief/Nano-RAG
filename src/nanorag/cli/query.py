@@ -140,3 +140,8 @@ def render(payload: dict[str, Any]) -> str:
         for s in payload["sources"]:
             lines.append(f"  [{s['label']}] {s['score']:.3f}  {s['source_uri']}")
     return "\n".join(lines) + "\n"
+
+
+def exit_code(payload: dict[str, Any]) -> int:
+    """Return ``0``: the command either completed or raised."""
+    return 0

@@ -82,3 +82,8 @@ def render(payload: dict[str, Any]) -> str:
         for d in payload["sources"]:
             lines.append(f"  {d['chunks']:>5}  {d['doc_id']}  {d['source_uri']}")
     return "\n".join(lines) + "\n"
+
+
+def exit_code(payload: dict[str, Any]) -> int:
+    """Return ``0``: the command either completed or raised."""
+    return 0

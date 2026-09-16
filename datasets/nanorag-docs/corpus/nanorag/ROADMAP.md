@@ -10,7 +10,7 @@ contiguous release list.
 | **A — Foundation** | `v0.0.1` | Repo installs, lints, type-checks, tests, builds a wheel on Linux + Windows. Core data types. | **done; Gate A passed** |
 | **B — Corpus to index** | `v0.0.4` | Real files → durable, searchable vectors. Fully offline. | **done; Gate B passed** |
 | **C — First answers (MVP)** | `v0.1.0` | Documents in, cited answer out — free key or fully offline. First public release. | **done — `v0.1.0`, Gate C passed** |
-| **D — Trust** | `v0.3.0` | Citations resolving to text spans, a CLI, quality as numbers in CI (≥ 200-item eval set). | **D1–D3 done — Gate D review next** |
+| **D — Trust** | `v0.3.0` | Citations resolving to text spans, a CLI, quality as numbers in CI (≥ 200-item eval set). | in progress (D1, D2 done) |
 | **E — Durability** | `v0.4.0` | Re-ingesting a changed corpus is correct and cheap. | not started |
 | **F — Quality** | `v0.6.0` | Beat the Phase D baseline with evidence — reranking, BM25/hybrid, MMR. Negative results published. | not started |
 | **G — Reach** | `v0.7.0` | PDF/HTML loaders, external stores (Qdrant, pgvector), hosted embeddings — without touching the core. | not started |
@@ -203,31 +203,6 @@ contiguous release list.
   fullwidth `【3】`, which the parser neither resolved nor counted — fixed
   by accepting `【n】` alongside `[n]`. `nanorag eval` lands with the
   harness in D3.
-- **D3** ✅ — `evaluation/` and the dataset. `datasets/nanorag-docs/`: 19
-  frozen documents (7 of the project's own docs at D2 plus 12 permissively
-  licensed package READMEs, attributed) and `dev.jsonl` with **341
-  hand-written items** — 317 answerable, gold given as a verbatim quote
-  that is resolved to character offsets at load time (missing or
-  ambiguous quotes fail loudly), so one dataset grades every chunker; 24
-  unanswerable, half off-topic and half on-topic-but-uncovered.
-  `retrieval_metrics.py` (Recall/Precision/hit-rate@k, MRR, nDCG@k with
-  novelty gains so overlapping chunks cannot push it past 1),
-  `answer_metrics.py` (citation validity and precision against gold,
-  abstention, SQuAD token-F1), `runner.py` (`evaluate_retrieval` offline
-  through the real `Rag`; `evaluate_answers` one call per item, records
-  provider failures per item and stops on quota/auth or ten in a row),
-  `report.py` (`EvalReport`, `thresholds.json` = baseline + tolerance).
-  `nanorag eval` (exit 6 on a threshold regression), `pytest -m eval` +
-  `.github/workflows/eval.yml` (nightly, one fixed image, offline),
-  `benchmarks/eval_sweep.py`. **The sweep picked the chunker default**:
-  128/64 over the plan's 512/64 (Recall@5 0.836 vs 0.694; the 7B Ollama
-  leg's answer rate 0.918 vs 0.785, citation precision 0.69 vs 0.61). The
-  free-tier API legs of the answer eval did not complete (Groq's daily
-  token cap, Gemini's rate limit) — a Gate D item, on a subset.
-  Baseline committed in `thresholds.json` with a 0.05 band (≈ 2 SE at
-  n = 317); everything in `docs/evaluation.md`.
-- **🚦 Gate D** — next: review against plan.md §9's Phase D block, decide
-  the API-model answer leg, tag `v0.3.0`.
 
 ## Out of scope through 1.0
 

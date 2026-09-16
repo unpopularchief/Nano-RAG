@@ -30,6 +30,17 @@ if TYPE_CHECKING:
 #: :func:`extend_to_token_limit`'s character-level bisection.
 DEFAULT_SEPARATORS: tuple[str, ...] = ("\n\n", "\n", ". ", " ")
 
+#: Default chunk budget, **picked by measurement** (Phase D3 sweep,
+#: ``docs/evaluation.md``): over 128 / 256 / 512 / 1024 target tokens and
+#: 0 / 32 / 64 overlap on the ``nanorag-docs`` eval set, 128-token chunks
+#: with a 64-token overlap retrieved the most gold at every cut-off
+#: (Recall@5 0.84 vs 0.69 for the previous 512 / 64) and gave a 7B local
+#: model its best answer and citation rates. Tokens are counted by the
+#: chunker's own counter — the warning-free ``HeuristicCounter`` unless one
+#: is passed — so 128 is roughly 512 characters.
+DEFAULT_TARGET_TOKENS = 128
+DEFAULT_OVERLAP_TOKENS = 64
+
 
 class Chunker(Protocol):
     """A component that splits one ``Document`` into ordered ``Chunk``s.

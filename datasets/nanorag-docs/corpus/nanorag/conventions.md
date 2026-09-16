@@ -96,28 +96,13 @@ explicit keyword arguments. Any invalid value raises `ConfigError`.
 ## Command line
 
 `cli/` is a thin shell over the facade: one module per subcommand, each
-`run(args, settings) -> payload` + `render(payload) -> str` +
-`exit_code(payload) -> int`, so `--json` and the text output are the same
-data and the JSON schema in `docs/cli.md` is the whole contract. stdout is the result and nothing else; logging,
+`run(args, settings) -> payload` + `render(payload) -> str`, so `--json`
+and the text output are the same data and the JSON schema in `docs/cli.md`
+is the whole contract. stdout is the result and nothing else; logging,
 warnings and errors go to stderr. Exit codes map onto the error hierarchy
 (`ConfigError` 3, `ProviderError` 4, `StoreError` 5, other `NanoRagError`
-1, usage 2, a failed eval threshold 6); an exception that is not a
-`NanoRagError` propagates. No
+1, usage 2); an exception that is not a `NanoRagError` propagates. No
 logic lives in the CLI that a library caller cannot reach.
-
-## Evaluation
-
-Quality is a number, measured on a **frozen** dataset (`datasets/<name>/`:
-a corpus that is never edited after its baseline is taken, `dev.jsonl`
-items whose gold is a verbatim quote resolved to character offsets, so
-one dataset grades every chunker alike). `evaluation/` is pure functions
-over ranked lists plus a runner that drives the real `Rag`; the retrieval
-run is offline and gates CI (`-m eval`, one fixed runner image,
-`thresholds.json` = baseline + tolerance ≥ the set's noise floor); the
-answer run needs a generator and is a manual, two-model comparison.
-Nothing ships enabled without a measured delta on this set; negative
-results are recorded in `docs/evaluation.md`. Never lower a floor to make
-a red run green — re-baseline only after a deliberate, documented change.
 
 ## Keys & secrets
 

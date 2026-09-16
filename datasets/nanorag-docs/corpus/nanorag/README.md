@@ -24,13 +24,9 @@ afternoon, run it against your own documents, and operate it for free.
 > writes is checked against the blocks actually in the prompt and resolved
 > to a `Citation` with the source document, span offsets and a validity
 > rate logged when a marker doesn't resolve. **There is a command line**
-> (`cli/`, session D2): `nanorag ingest | query | inspect | eval`, with
-> `--json` payloads and exit codes documented in [`docs/cli.md`](docs/cli.md).
-> **And quality is now a number** (`evaluation/`, session D3): a frozen
-> 341-item dataset, Recall/MRR/nDCG against gold spans, a nightly CI gate
-> with committed thresholds, and a chunk-size sweep that changed the
-> default chunker — see [`docs/evaluation.md`](docs/evaluation.md) and the
-> numbers below. See [`plan.md`](plan.md) §9 for the phased roadmap and
+> (`cli/`, session D2): `nanorag ingest | query | inspect`, with `--json`
+> payloads and exit codes documented in [`docs/cli.md`](docs/cli.md). See
+> [`plan.md`](plan.md) §9 for the phased roadmap and
 > [`ROADMAP.md`](ROADMAP.md) for the condensed version.
 
 ## What it will be
@@ -40,8 +36,7 @@ afternoon, run it against your own documents, and operate it for free.
 - **Correct before clever.** Exact vector search, deterministic ids,
   transactional ingest, measured recall — before ANN, agents or query planners.
 - **Measured.** Retrieval quality is a number in CI. A regression in Recall@5
-  fails the build — the numbers and their tolerance band are in
-  [Evaluation](#evaluation) below.
+  fails the build.
 - **Free to run.** Local ONNX embeddings (no torch, no GPU needed) plus
   free-tier generation APIs (Groq, Gemini) with Ollama as a first-class offline
   path. The full pipeline runs on a laptop with no spend and no keys.
@@ -92,7 +87,6 @@ nanorag ingest docs/ --glob "**/*.md"          # offline: local embeddings, no k
 nanorag query "Where do API keys come from?"   # answer + citations + the blocks in the prompt
 nanorag query "…" --json | jq .answer.citations
 nanorag inspect                                # model, counts, one line per document
-nanorag eval datasets/nanorag-docs/dev.jsonl   # offline retrieval eval; --thresholds gates
 ```
 
 stdout carries only the result (logs and errors go to stderr), `--json`
@@ -111,34 +105,6 @@ that tells it to abstain; the flag is a tunable heuristic
 (`insufficient_context()` in `pipeline.py`), not a guarantee — see Limits.
 When retrieved chunks were dropped to fit the model's window,
 `answer.truncated = True`. Neither is ever silent.
-
-## Evaluation
-
-Measured on [`datasets/nanorag-docs`](datasets/nanorag-docs/README.md) —
-19 frozen technical documents, **341 hand-written questions** (317
-answerable, 24 unanswerable), gold given as verbatim quotes resolved to
-character offsets — with the default pipeline (`bge-base-en-v1.5`,
-`RecursiveChunker(128, 64)`, exact cosine search):
-
-| metric | value | gate |
-| --- | ---: | --- |
-| Recall@5 | **0.836** | fails below 0.786 |
-| Recall@10 | 0.880 | fails below 0.830 |
-| MRR | 0.659 | fails below 0.609 |
-| nDCG@5 | 0.698 | fails below 0.648 |
-| false abstentions (answerable items flagged) | 0.3 % | reported |
-| abstentions on unanswerable items (retrieval flag) | 42 % | reported |
-
-The band is 0.05 ≈ two standard errors at n = 317; `pytest -m eval`
-checks it nightly on one fixed runner image (`.github/workflows/eval.yml`),
-fully offline. **The chunker default was picked by this measurement**: a
-sweep over 128/256/512/1024-token chunks × 0/32/64 overlap × two
-embedders found 128-token chunks with 64 overlap retrieve the most gold at
-every cut-off (Recall@5 0.84 vs 0.69 for the previous 512/64 default), and
-a 7B local model then answers 92 % of the answerable questions instead of
-79 %, with better-placed citations, on half the prompt. Sweep, answer
-runs, negative results and how to re-baseline: [`docs/evaluation.md`](docs/evaluation.md).
-`nanorag eval datasets/nanorag-docs/dev.jsonl` reproduces it.
 
 ## Limits (stated up front)
 

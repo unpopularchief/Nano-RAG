@@ -1,11 +1,13 @@
 """The ``nanorag`` command: argument parsing, dispatch, exit codes.
 
-Three subcommands — ``ingest``, ``query``, ``inspect`` — each a module in
-this package with the same two-function shape: ``run(args, settings)``
-returns a JSON-serialisable payload, and ``render(payload)`` turns that
-payload into the human-readable text. ``--json`` prints the payload
-itself, so **the text output is a view of the JSON, never a superset of
-it** — the schema documented in ``docs/cli.md`` is the whole contract.
+Four subcommands — ``ingest``, ``query``, ``inspect``, ``eval`` — each a
+module in this package with the same three-function shape:
+``run(args, settings)`` returns a JSON-serialisable payload,
+``render(payload)`` turns that payload into the human-readable text, and
+``exit_code(payload)`` says how the process ends once it has been printed.
+``--json`` prints the payload itself, so **the text output is a view of
+the JSON, never a superset of it** — the schema documented in
+``docs/cli.md`` is the whole contract.
 
 Two stream rules keep ``--json`` machine-readable:
 
@@ -21,6 +23,7 @@ Exit codes are stable and map onto the error hierarchy in
     3  ConfigError   — no generator, missing [local] extra, bad setting
     4  ProviderError — auth, quota, rate limit, retired model, 5xx
     5  StoreError    — index built with another model, no index to inspect
+    6  eval only: a metric fell below a committed threshold (report printed)
 
 Keys come from the environment (plan.md §4). ``.env`` in the working
 directory is read as a convenience — ``KEY=VALUE`` lines exported only
@@ -41,6 +44,7 @@ from pathlib import Path
 from typing import Any
 
 from nanorag import __version__
+from nanorag.cli import eval as eval_command
 from nanorag.cli import ingest, inspect, query
 from nanorag.config import Settings
 from nanorag.errors import ConfigError, NanoRagError, ProviderError, StoreError
@@ -55,7 +59,12 @@ EXIT_STORE = 5
 #: Default ``--env-file``; silently ignored when absent.
 DEFAULT_ENV_FILE = ".env"
 
-_COMMANDS = {"ingest": ingest, "query": query, "inspect": inspect}
+_COMMANDS = {
+    "ingest": ingest,
+    "query": query,
+    "inspect": inspect,
+    "eval": eval_command,
+}
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -85,11 +94,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         payload = _COMMANDS[args.command].run(args, settings)
     except NanoRagError as exc:
         return _fail(exc)
+    command = _COMMANDS[args.command]
     if args.json:
         print(json.dumps(payload, indent=2, ensure_ascii=False))
     else:
-        print(_COMMANDS[args.command].render(payload), end="")
-    return EXIT_OK
+        print(command.render(payload), end="")
+    code: int = command.exit_code(payload)
+    return code
 
 
 def build_parser() -> argparse.ArgumentParser:

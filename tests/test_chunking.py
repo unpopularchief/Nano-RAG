@@ -8,7 +8,13 @@ from nanorag.chunking import (
     MarkdownChunker,
     RecursiveChunker,
 )
-from nanorag.chunking.base import atomic_spans, default_counter, pack_spans
+from nanorag.chunking.base import (
+    DEFAULT_OVERLAP_TOKENS,
+    DEFAULT_TARGET_TOKENS,
+    atomic_spans,
+    default_counter,
+    pack_spans,
+)
 from nanorag.chunking.markdown import _iter_sections
 from nanorag.errors import ChunkingError
 from nanorag.hashing import content_hash, stable_doc_id
@@ -107,10 +113,13 @@ def test_fixed_chunker_ignores_natural_boundaries():
 
 
 def test_recursive_chunker_is_the_documented_default_signature():
-    # plan.md §7: RecursiveChunker(target_tokens=512, overlap_tokens=64)
-    chunker = RecursiveChunker(target_tokens=512, overlap_tokens=64)
-    assert chunker.target_tokens == 512
-    assert chunker.overlap_tokens == 64
+    # plan.md §7 wrote RecursiveChunker(target_tokens=512, overlap_tokens=64);
+    # the D3 sweep (docs/evaluation.md) moved the default to 128 / 64.
+    chunker = RecursiveChunker()
+    assert (chunker.target_tokens, chunker.overlap_tokens) == (128, 64)
+    assert (DEFAULT_TARGET_TOKENS, DEFAULT_OVERLAP_TOKENS) == (128, 64)
+    for cls in (FixedChunker, MarkdownChunker):
+        assert (cls().target_tokens, cls().overlap_tokens) == (128, 64)
     assert chunker.separators == DEFAULT_SEPARATORS
 
 

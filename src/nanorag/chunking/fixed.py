@@ -12,6 +12,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from nanorag.chunking.base import (
+    DEFAULT_OVERLAP_TOKENS,
+    DEFAULT_TARGET_TOKENS,
     default_counter,
     extend_to_token_limit,
     make_chunk,
@@ -48,8 +50,8 @@ class FixedChunker:
     def __init__(
         self,
         *,
-        target_tokens: int = 512,
-        overlap_tokens: int = 64,
+        target_tokens: int = DEFAULT_TARGET_TOKENS,
+        overlap_tokens: int = DEFAULT_OVERLAP_TOKENS,
         counter: TokenCounter | None = None,
     ) -> None:
         """Validate the budget and store it (see the class docstring)."""
