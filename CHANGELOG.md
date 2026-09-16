@@ -7,6 +7,19 @@ breaking changes bump the minor).
 
 ## [Unreleased]
 
+### Added
+
+- **Phase E, session E1 — durability.** `Rag.ingest()` does document-level
+  change detection: a document whose `content_hash` matches what is
+  already stored for its `doc_id` is skipped entirely (no rechunk, no
+  embedder call, no store write). `Rag.delete_document(doc_id)` cascades
+  through SQLite (chunks, embeddings) and tombstones the same chunk ids in
+  the in-memory index in the same call; `Rag.compact()` physically
+  reclaims tombstoned rows. The underlying tombstone mask, `delete()` and
+  `compact()` on `NumpyVectorStore`, and cascading `delete_document()` on
+  `SqliteDocumentStore`, were already in place since Phase B — this session
+  is the facade-level API plan.md scoped for Phase E.
+
 ## [0.3.0] — 2026-09-16
 
 Phase D: citations resolve to text spans, a command line, and quality is a

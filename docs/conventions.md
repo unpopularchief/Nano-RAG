@@ -65,7 +65,12 @@ Reserved `nanorag.*` metadata key namespace.
 arithmetic the read path needs (`context_budget`, `insufficient_context`,
 `load_vectors`) is a module-level function in `pipeline.py`, and a test
 reproduces `Rag.query()` from those functions alone. If a behaviour exists
-only inside the facade, that is a bug.
+only inside the facade, that is a bug. `delete_document(doc_id)` and
+`compact()` (Phase E, session E1) are the same pattern on the write side:
+each is a thin sequence over `SqliteDocumentStore.delete_document` and
+`NumpyVectorStore.delete`/`compact`, which already do the real work
+(cascade, tombstone mask) — the facade only wires the two stores together
+so a deletion is never visible in one but not the other.
 
 ## Public types
 

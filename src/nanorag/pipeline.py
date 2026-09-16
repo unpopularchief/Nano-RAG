@@ -462,7 +462,16 @@ class Rag:
     def ingest(self, documents: Iterable[Document]) -> int:
         """Chunk, embed and persist *documents*; return the number of chunks.
 
-        Per document: the text is put through :func:`~nanorag.hashing.
+        A document whose ``content_hash`` matches what is already stored
+        for its ``doc_id`` is skipped entirely — no chunking, no embedder
+        call, no store write (plan.md §9 Phase E "change detection"). This
+        is a document-level shortcut only: it never substitutes for the
+        chunk-level reuse a *changed* document still gets from
+        ``CachingEmbedder`` (keyed by each chunk's own text, not this
+        hash), which is what keeps re-embedding a large edited document
+        cheap (plan.md §5).
+
+        Otherwise, the text is put through :func:`~nanorag.hashing.
         normalize_text` (NFC + LF) before chunking — a ``Loader`` returns
         raw bytes-as-read untouched (plan.md §6), so without this step a
         CRLF checkout and an LF checkout of the identical content chunk
@@ -476,6 +485,10 @@ class Rag:
         """
         total = 0
         for document in documents:
+            existing = self.docs.get_document(document.doc_id)
+            if existing is not None and existing.content_hash == document.content_hash:
+                total += self.docs.count_chunks(document.doc_id)
+                continue
             normalized = normalize_text(document.text)
             if normalized != document.text:
                 document = replace(document, text=normalized)
@@ -495,6 +508,31 @@ class Rag:
                 self.vectors.upsert(ids, vectors)
             total += len(chunks)
         return total
+
+    def delete_document(self, doc_id: str) -> int:
+        """Remove a document from search and the store; return chunks removed.
+
+        Cascades through SQLite (chunks, then embeddings — ``ON DELETE
+        CASCADE``) and tombstones the same chunk ids in the in-memory index
+        in the same call, so a deleted chunk is unreachable from both
+        ``retrieve()`` and a fresh :func:`load_vectors` rebuild from the
+        same instant (plan.md §9 Phase E). The rows are not yet physically
+        reclaimed in the index — call :meth:`compact` for that. An unknown
+        *doc_id* is a no-op.
+        """
+        chunk_ids = [c.chunk_id for c in self.docs.get_chunks(doc_id)]
+        self.docs.delete_document(doc_id)
+        if chunk_ids:
+            self.vectors.delete(chunk_ids)
+        return len(chunk_ids)
+
+    def compact(self) -> None:
+        """Physically reclaim tombstoned rows in the in-memory index.
+
+        Deletion alone (:meth:`delete_document`) already excludes tombstoned
+        chunks from search; this only reclaims their space (plan.md §6).
+        """
+        self.vectors.compact()
 
     # -- read path -------------------------------------------------------------
 

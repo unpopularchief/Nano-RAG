@@ -29,8 +29,12 @@ afternoon, run it against your own documents, and operate it for free.
 > 341-item dataset, Recall/MRR/nDCG against gold spans, a nightly CI gate
 > with committed thresholds, and a chunk-size sweep that changed the
 > default chunker — see [`docs/evaluation.md`](docs/evaluation.md) and the
-> numbers below. See [`plan.md`](plan.md) §9 for the phased roadmap and
-> [`ROADMAP.md`](ROADMAP.md) for the condensed version.
+> numbers below. **Phase E (durability) is underway** (session E1):
+> `Rag.ingest()` skips a document entirely — no rechunk, no re-embed, no
+> store write — when its content hasn't changed since the last ingest, and
+> `Rag.delete_document(doc_id)` / `Rag.compact()` remove a document from
+> search and the store for good. See [`plan.md`](plan.md) §9 for the
+> phased roadmap and [`ROADMAP.md`](ROADMAP.md) for the condensed version.
 
 ## What it will be
 

@@ -12,6 +12,7 @@ import httpx
 import pytest
 
 from nanorag import Rag
+from nanorag.chunking import RecursiveChunker
 from nanorag.config import Settings
 from nanorag.context import ContextBuilder
 from nanorag.errors import ConfigError, IndexModelMismatch
@@ -219,6 +220,94 @@ def test_reingest_of_an_unchanged_document_is_idempotent():
     assert len(rag.vectors) == 1
     assert rag.ingest([_doc("empty.txt", "")]) == 0
     assert rag.docs.get_document(stable_doc_id("empty.txt")) is not None
+
+
+class _CountingChunker:
+    """Wraps a real chunker, counting calls (change-detection spy)."""
+
+    def __init__(self, inner):
+        self.inner = inner
+        self.calls = 0
+
+    def chunk(self, document):
+        self.calls += 1
+        return self.inner.chunk(document)
+
+
+class _CountingEmbedder(FakeEmbedder):
+    """A ``FakeEmbedder`` that counts its own ``embed`` calls."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.calls = 0
+
+    def embed(self, texts):
+        self.calls += 1
+        return super().embed(texts)
+
+
+def test_reingest_of_an_unchanged_document_skips_rechunking_and_reembedding():
+    chunker = _CountingChunker(RecursiveChunker())
+    embedder = _CountingEmbedder(dim=DIM)
+    rag = Rag(
+        embedder=embedder,
+        generator=FakeGenerator(),
+        docs=SqliteDocumentStore(":memory:"),
+        chunker=chunker,
+        counter=HeuristicCounter(warn=False),
+    )
+    total_first = rag.ingest([_doc("a.txt", "alpha beta gamma")])
+    assert chunker.calls == 1
+    assert embedder.calls == 1
+
+    total_second = rag.ingest([_doc("a.txt", "alpha beta gamma")])
+    assert chunker.calls == 1  # unchanged content_hash -> no rechunk
+    assert embedder.calls == 1  # -> no re-embed either
+    assert total_second == total_first == 1
+    assert len(rag.vectors) == 1
+
+    rag.ingest([_doc("a.txt", "totally different text now")])
+    assert chunker.calls == 2  # a real change still triggers a full rechunk
+
+
+def test_delete_document_removes_it_from_search_and_sqlite():
+    rag = _rag()
+    rag.ingest([_doc("a.txt", "alpha beta gamma"), _doc("b.txt", "delta epsilon")])
+    doc_id = stable_doc_id("a.txt")
+
+    removed = rag.delete_document(doc_id)
+
+    assert removed == 1
+    assert rag.docs.get_document(doc_id) is None
+    assert rag.docs.get_chunks(doc_id) == []
+    assert rag.docs.count_chunks() == 1  # only b.txt's chunk remains
+    hits = rag.retrieve("alpha beta gamma", k=5)
+    assert doc_id not in {h.chunk.doc_id for h in hits}
+    assert len(rag.vectors) == 1
+
+
+def test_delete_document_unknown_doc_id_is_a_noop():
+    rag = _rag()
+    rag.ingest([_doc("a.txt", "alpha beta gamma")])
+    assert rag.delete_document("does-not-exist") == 0
+    assert len(rag.vectors) == 1
+
+
+def test_compact_after_delete_leaves_search_unchanged():
+    rag = _rag()
+    rag.ingest([_doc("a.txt", "alpha beta gamma"), _doc("b.txt", "delta epsilon")])
+    rag.delete_document(stable_doc_id("a.txt"))
+    before = rag.retrieve("delta epsilon", k=5)
+
+    rag.compact()
+
+    after = rag.retrieve("delta epsilon", k=5)
+    assert [h.chunk.chunk_id for h in before] == [h.chunk.chunk_id for h in after]
+    assert len(rag.vectors) == 1
+
+    # The reclaimed row is reused cleanly by a later ingest (plan.md §6).
+    rag.ingest([_doc("c.txt", "zeta eta theta")])
+    assert len(rag.vectors) == 2
 
 
 # --- read path: the e2e with fakes --------------------------------------------

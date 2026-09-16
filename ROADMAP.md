@@ -11,7 +11,7 @@ contiguous release list.
 | **B — Corpus to index** | `v0.0.4` | Real files → durable, searchable vectors. Fully offline. | **done; Gate B passed** |
 | **C — First answers (MVP)** | `v0.1.0` | Documents in, cited answer out — free key or fully offline. First public release. | **done — `v0.1.0`, Gate C passed** |
 | **D — Trust** | `v0.3.0` | Citations resolving to text spans, a CLI, quality as numbers in CI (≥ 200-item eval set). | **done — `v0.3.0`, Gate D passed** |
-| **E — Durability** | `v0.4.0` | Re-ingesting a changed corpus is correct and cheap. | not started |
+| **E — Durability** | `v0.4.0` | Re-ingesting a changed corpus is correct and cheap. | in progress (E1 done) |
 | **F — Quality** | `v0.6.0` | Beat the Phase D baseline with evidence — reranking, BM25/hybrid, MMR. Negative results published. | not started |
 | **G — Reach** | `v0.7.0` | PDF/HTML loaders, external stores (Qdrant, pgvector), hosted embeddings — without touching the core. | not started |
 | **H — Production** | `v1.0.0` | Structured logging, cost accounting, deployment guide, threat model, API freeze. | not started |
@@ -241,6 +241,29 @@ contiguous release list.
   `--tags` flag on `nanorag eval` that doesn't exist yet — tracked as a
   follow-up (see CHANGELOG `[0.3.0]`), not reopened as Phase D work.
   Classifier bumped `3 - Alpha` → `4 - Beta`.
+
+## Phase E sessions
+
+- **E1** ✅ — Change detection, `delete_document` cascade, tombstone mask,
+  `compact()`. `Rag.ingest()` now compares an incoming document's
+  `content_hash` against what is already stored for its `doc_id` and, on a
+  match, skips chunking, embedding and every store write entirely — a
+  document-level shortcut that sits above the existing chunk-level reuse
+  (`CachingEmbedder` keyed by each chunk's own text) rather than replacing
+  it, so a genuinely changed document still re-embeds only the chunks
+  whose text moved. `Rag.delete_document(doc_id)` cascades through SQLite
+  (chunks, embeddings — `ON DELETE CASCADE`) and tombstones the same chunk
+  ids in `NumpyVectorStore` in one call, so a deleted chunk is unreachable
+  from both `retrieve()` and a store rebuild from that instant;
+  `Rag.compact()` physically reclaims the tombstoned rows. The tombstone
+  mask and `NumpyVectorStore.delete`/`compact`, and
+  `SqliteDocumentStore.delete_document`'s cascade, were already built in
+  Phase B3 by design (plan.md: "designed into the Phase B schema even
+  though the API lands in Phase E") — E1 is the facade wiring plan.md
+  scoped here, plus the tests proving the whole path end to end. Checkpoint
+  met: deleted chunks vanish from search and SQLite in the same call to
+  `delete_document`, confirmed by a pipeline-level test independent of the
+  store-level tests already covering the primitives.
 
 ## Out of scope through 1.0
 
