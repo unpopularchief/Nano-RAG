@@ -50,7 +50,7 @@ from nanorag.citations.parser import CitationReport, parse_citations
 from nanorag.config import Settings
 from nanorag.context.builder import Context, ContextBuilder
 from nanorag.embeddings.base import Embedder
-from nanorag.errors import ConfigError, IndexModelMismatch
+from nanorag.errors import ConfigError, IndexModelMismatch, StoreError
 from nanorag.generation.base import Generator
 from nanorag.generation.presets import GROQ, OLLAMA
 from nanorag.hashing import normalize_text
@@ -62,7 +62,15 @@ from nanorag.store.filters import Filter
 from nanorag.store.numpy_store import NumpyVectorStore
 from nanorag.store.sqlite_docs import SqliteDocumentStore
 from nanorag.tokens import TiktokenCounter
-from nanorag.types import Answer, Document, IngestReport, ScoredChunk, Usage
+from nanorag.types import (
+    Answer,
+    Chunk,
+    Document,
+    IngestReport,
+    ScoredChunk,
+    SyncReport,
+    Usage,
+)
 
 if TYPE_CHECKING:
     from nanorag.tokens import TokenCounter
@@ -82,6 +90,24 @@ NO_PROVIDER = "none"
 #: function docstring). Meaningless for any other embedder, so ``Rag()``
 #: itself defaults to no floor.
 DEFAULT_MIN_SCORE = 0.55
+#: Metadata key a document opts into near-duplicate detection with (plan.md
+#: §18 F13): the value is a blocking key, and only chunks sharing it are ever
+#: compared against each other. A document without this key pays nothing.
+DEDUP_GROUP_KEY = "nanorag.dedup_group"
+#: Metadata key a losing chunk is tagged with: the winning chunk's id.
+DEDUP_OF_KEY = "nanorag.duplicate_of"
+#: Cosine similarity at or above which two chunks in the same dedup group
+#: count as near-duplicates (plan.md §11 "hash, then cosine > 0.97") —
+#: deliberately not embedder-conditional like :data:`DEFAULT_MIN_SCORE`:
+#: "almost identical text" sits in the same very-high range for any sane
+#: embedding model, unlike "good enough to answer from".
+DEFAULT_DUPLICATE_THRESHOLD = 0.97
+#: :func:`Rag.sync_path` refuses ``apply=True`` past this fraction of the
+#: store's document count deleted in one run (plan.md §18 F9) — a
+#: deliberately conservative catch for "wrong root" / "unmounted volume",
+#: not a tuned value; override per call for a corpus with legitimate bulk
+#: deletions.
+DEFAULT_MAX_DELETE_FRACTION = 0.5
 
 _EMPTY_CONTEXT = Context(
     blocks=(), labels={}, text="", token_count=0, budget_tokens=1, truncated=False
@@ -339,6 +365,10 @@ class Rag:
         embedder's own score scale, so it defaults to off here;
         :meth:`from_defaults` sets :data:`DEFAULT_MIN_SCORE` for the
         default embedder.
+    duplicate_threshold
+        Cosine similarity at or above which :meth:`ingest` flags two
+        chunks in the same :data:`DEDUP_GROUP_KEY` group as near-duplicates
+        (plan.md §18 F13). Defaults to :data:`DEFAULT_DUPLICATE_THRESHOLD`.
 
     Raises
     ------
@@ -363,6 +393,7 @@ class Rag:
         min_results: int = 1,
         min_gap: float = 0.0,
         min_score: float | None = None,
+        duplicate_threshold: float = DEFAULT_DUPLICATE_THRESHOLD,
     ) -> None:
         """Wire the components together (see the class docstring)."""
         meta = docs.index_meta()
@@ -393,6 +424,7 @@ class Rag:
         self.min_results = min_results
         self.min_gap = min_gap
         self.min_score = min_score
+        self.duplicate_threshold = duplicate_threshold
 
     @classmethod
     def from_defaults(
@@ -478,6 +510,8 @@ class Rag:
         differently and retrieve differently. ``content_hash`` needs no
         adjustment: it already runs the same normalisation internally, so
         it is unchanged by this rewrite (``normalize_text`` is idempotent).
+        A chunk in a document opted into near-duplicate detection (see
+        :meth:`_tag_near_duplicates`) may be tagged before it is written.
         The chunks then replace any prior version's in one SQLite
         transaction, their vectors are persisted, and only then is the
         in-memory index updated — rows for chunks that no longer exist are
@@ -495,19 +529,74 @@ class Rag:
             stale = {c.chunk_id for c in self.docs.get_chunks(document.doc_id)}
             chunks = self.chunker.chunk(document)
             ids = [c.chunk_id for c in chunks]
-            self.docs.upsert_document(document, chunks)
+            vectors: np.ndarray | None = None
             if chunks:
                 vectors = self.embedder.embed([c.text for c in chunks])
+                chunks = self._tag_near_duplicates(
+                    document, chunks, vectors, exclude=stale | set(ids)
+                )
+            self.docs.upsert_document(document, chunks)
+            if chunks and vectors is not None:
                 self.docs.upsert_embeddings(
                     self.embedder.model_id, self.embedder.dim, ids, vectors
                 )
             gone = sorted(stale - set(ids))
             if gone:
                 self.vectors.delete(gone)
-            if chunks:
+            if chunks and vectors is not None:
                 self.vectors.upsert(ids, vectors)
             total += len(chunks)
         return total
+
+    def _tag_near_duplicates(
+        self,
+        document: Document,
+        chunks: Sequence[Chunk],
+        vectors: np.ndarray,
+        *,
+        exclude: set[str],
+    ) -> list[Chunk]:
+        """Flag chunks that near-duplicate an already-indexed one (plan.md §18 F13).
+
+        Bounded by a blocking key so this never compares against the whole
+        corpus, the O(n)-per-chunk cost F13 warns against: a document is
+        checked at all only if it sets ``metadata[DEDUP_GROUP_KEY]``, and
+        then only against chunks sharing that exact group (found via
+        ``docs.filter_chunk_ids`` — the metadata filter already used for
+        retrieval pre-filtering, not a new index). A corpus that never sets
+        the key pays nothing.
+
+        A chunk found at or above ``duplicate_threshold`` cosine similarity
+        to a group member from a different document — *different*
+        enforced by *exclude*, this document's own current and prior chunk
+        ids — is the loser: kept, never dropped (dropping would rotate
+        every later chunk's ordinal and id for no reason, and break any
+        citation already pointing at it), but tagged
+        ``{DEDUP_OF_KEY: winner_chunk_id}`` in its own metadata.
+
+        Comparisons run against the index *before* this document's chunks
+        are upserted into it, so two never-before-seen near-duplicate
+        documents ingested in the same batch do not catch each other —
+        only a duplicate of something already persisted. Documented, not
+        fixed: catching batch-internal duplicates needs an all-pairs
+        comparison within the batch, which is unbounded in the same way
+        F13 warns against for the corpus as a whole.
+        """
+        group = document.metadata.get(DEDUP_GROUP_KEY)
+        if group is None:
+            return list(chunks)
+        candidates = self.docs.filter_chunk_ids({DEDUP_GROUP_KEY: group}) - exclude
+        if not candidates:
+            return list(chunks)
+        tagged = []
+        for chunk, vector in zip(chunks, vectors, strict=True):
+            hits = self.vectors.search(vector, k=1, allowed_ids=candidates)
+            if hits and hits[0][1] >= self.duplicate_threshold:
+                chunk = replace(
+                    chunk, metadata={**chunk.metadata, DEDUP_OF_KEY: hits[0][0]}
+                )
+            tagged.append(chunk)
+        return tagged
 
     def delete_document(self, doc_id: str) -> int:
         """Remove a document from search and the store; return chunks removed.
@@ -533,6 +622,106 @@ class Rag:
         chunks from search; this only reclaims their space (plan.md §6).
         """
         self.vectors.compact()
+
+    def sync_path(
+        self,
+        root: str | Path,
+        *,
+        glob: str = "**/*",
+        ignore: Sequence[str] = (),
+        apply: bool = False,
+        max_delete_fraction: float = DEFAULT_MAX_DELETE_FRACTION,
+    ) -> SyncReport:
+        """Reconcile the store against *root*: add, update, delete.
+
+        Dry run by default (``apply=False``): walks *root* exactly as
+        :meth:`ingest_path` would and returns the plan without writing
+        anything. Comparing the walk's ``source_uri`` values against the
+        store's current documents classifies each into ``added`` (on disk,
+        not yet stored), ``updated``/``unchanged`` (in both, split by
+        ``content_hash``) or ``deleted`` (stored, no longer produced by the
+        walk). Pass ``apply=True`` to execute the plan: ``added`` and
+        ``updated`` go through :meth:`ingest` (whose own change detection
+        is what makes a re-sync of 1,000 mostly-unchanged documents cheap —
+        plan.md §9 Phase E), and ``deleted`` through :meth:`delete_document`.
+
+        Parameters
+        ----------
+        root
+            Directory to walk (see :meth:`ingest_path`).
+        glob, ignore
+            Same semantics as :meth:`ingest_path` / ``DirectoryLoader``.
+        apply
+            ``False`` (default): compute and return the plan only.
+            ``True``: execute it.
+        max_delete_fraction
+            ``apply=True`` refuses to run if ``len(deleted)`` exceeds this
+            fraction of the store's document count from before the sync —
+            a mistyped *root* or an unmounted volume must not silently
+            empty the corpus (plan.md §18 F9). Checked, but never raised,
+            on a dry run: :attr:`SyncReport.over_delete_guard` reports the
+            same condition either way.
+
+        Raises
+        ------
+        ConfigError
+            *max_delete_fraction* is not in ``[0, 1]``.
+        StoreError
+            ``apply=True`` and the deletions would exceed
+            *max_delete_fraction*. Nothing is written when this is raised
+            — ``added``/``updated`` are not applied either, so a sync
+            either fully succeeds or fully does not.
+
+        """
+        if not 0 <= max_delete_fraction <= 1:
+            raise ConfigError(
+                f"max_delete_fraction must be in [0, 1], got {max_delete_fraction}"
+            )
+        report = self.loader.load_path(root, glob=glob, ignore=ignore)
+        on_disk = {d.source_uri: d for d in report.loaded}
+        stored = {d.source_uri: d.doc_id for d in self.docs.iter_documents()}
+
+        added = sorted(on_disk.keys() - stored.keys())
+        updated = []
+        unchanged = []
+        for uri in sorted(on_disk.keys() & stored.keys()):
+            current = self.docs.get_document(stored[uri])
+            if (
+                current is not None
+                and current.content_hash == on_disk[uri].content_hash
+            ):
+                unchanged.append(uri)
+            else:
+                updated.append(uri)
+        deleted = sorted(stored.keys() - on_disk.keys())
+
+        corpus_size = self.docs.count_documents()
+        over_guard = len(deleted) > max_delete_fraction * corpus_size
+
+        if apply:
+            if over_guard:
+                raise StoreError(
+                    "sync would delete more than max_delete_fraction of the "
+                    "corpus; pass a higher max_delete_fraction if this is "
+                    "really intended",
+                    to_delete=len(deleted),
+                    corpus_size=corpus_size,
+                    max_delete_fraction=max_delete_fraction,
+                )
+            self.ingest(on_disk[uri] for uri in added + updated)
+            for uri in deleted:
+                self.delete_document(stored[uri])
+
+        return SyncReport(
+            added=tuple(added),
+            updated=tuple(updated),
+            unchanged=tuple(unchanged),
+            deleted=tuple(deleted),
+            skipped=report.skipped,
+            failed=report.failed,
+            applied=apply,
+            over_delete_guard=over_guard,
+        )
 
     # -- read path -------------------------------------------------------------
 

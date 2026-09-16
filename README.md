@@ -29,12 +29,18 @@ afternoon, run it against your own documents, and operate it for free.
 > 341-item dataset, Recall/MRR/nDCG against gold spans, a nightly CI gate
 > with committed thresholds, and a chunk-size sweep that changed the
 > default chunker — see [`docs/evaluation.md`](docs/evaluation.md) and the
-> numbers below. **Phase E (durability) is underway** (session E1):
-> `Rag.ingest()` skips a document entirely — no rechunk, no re-embed, no
-> store write — when its content hasn't changed since the last ingest, and
-> `Rag.delete_document(doc_id)` / `Rag.compact()` remove a document from
-> search and the store for good. See [`plan.md`](plan.md) §9 for the
-> phased roadmap and [`ROADMAP.md`](ROADMAP.md) for the condensed version.
+> numbers below. **Phase E (durability, sessions E1–E2) is feature-complete,
+> Gate E review next:** `Rag.ingest()` skips a document entirely — no
+> rechunk, no re-embed, no store write — when its content hasn't changed
+> since the last ingest; `Rag.delete_document(doc_id)` / `Rag.compact()`
+> remove a document from search and the store for good; `Rag.sync_path(root)`
+> reconciles the whole index against a directory in one call — dry run by
+> default, `apply=True` to add/update/delete for real, with a guard that
+> refuses to delete past a configurable fraction of the corpus in one run —
+> also a CLI command, `nanorag sync ROOT [--apply]`; and near-duplicate
+> chunks (opted in per document via metadata) are flagged, not dropped. See
+> [`plan.md`](plan.md) §9 for the phased roadmap and
+> [`ROADMAP.md`](ROADMAP.md) for the condensed version.
 
 ## What it will be
 

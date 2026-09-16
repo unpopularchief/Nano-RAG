@@ -19,6 +19,24 @@ breaking changes bump the minor).
   `compact()` on `NumpyVectorStore`, and cascading `delete_document()` on
   `SqliteDocumentStore`, were already in place since Phase B — this session
   is the facade-level API plan.md scoped for Phase E.
+- **Phase E, session E2 — `sync_path()` and near-duplicate detection.**
+  `Rag.sync_path(root, apply=False)` walks a directory and reconciles the
+  store against it: `added` (on disk, not yet stored), `updated`/
+  `unchanged` (both, split by `content_hash`), `deleted` (stored, no
+  longer on disk). Dry run by default; `apply=True` executes the plan
+  through `ingest()`/`delete_document()` — and refuses to run at all if
+  the deletions exceed `max_delete_fraction` (default 50%) of the store's
+  document count, so a mistyped root or an unmounted volume cannot
+  silently empty the corpus. New `SyncReport` type; new `nanorag sync
+  ROOT [--apply] [--max-delete-fraction F]` CLI command (offline, like
+  `ingest`). Near-duplicate detection: a document opts a chunk into the
+  check by setting `metadata["nanorag.dedup_group"]`; a new chunk found
+  ≥ 0.97 cosine-similar to an already-indexed chunk in the same group (a
+  different document — never itself) is kept but tagged
+  `nanorag.duplicate_of` with the winner's chunk id, rather than dropped.
+  Bounded cost: a document without the group key is never compared
+  against anything, and a document that sets it is only ever compared
+  against its own group, not the whole corpus.
 
 ## [0.3.0] — 2026-09-16
 

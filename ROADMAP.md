@@ -11,7 +11,7 @@ contiguous release list.
 | **B — Corpus to index** | `v0.0.4` | Real files → durable, searchable vectors. Fully offline. | **done; Gate B passed** |
 | **C — First answers (MVP)** | `v0.1.0` | Documents in, cited answer out — free key or fully offline. First public release. | **done — `v0.1.0`, Gate C passed** |
 | **D — Trust** | `v0.3.0` | Citations resolving to text spans, a CLI, quality as numbers in CI (≥ 200-item eval set). | **done — `v0.3.0`, Gate D passed** |
-| **E — Durability** | `v0.4.0` | Re-ingesting a changed corpus is correct and cheap. | in progress (E1 done) |
+| **E — Durability** | `v0.4.0` | Re-ingesting a changed corpus is correct and cheap. | E1–E2 done — Gate E review next |
 | **F — Quality** | `v0.6.0` | Beat the Phase D baseline with evidence — reranking, BM25/hybrid, MMR. Negative results published. | not started |
 | **G — Reach** | `v0.7.0` | PDF/HTML loaders, external stores (Qdrant, pgvector), hosted embeddings — without touching the core. | not started |
 | **H — Production** | `v1.0.0` | Structured logging, cost accounting, deployment guide, threat model, API freeze. | not started |
@@ -264,6 +264,35 @@ contiguous release list.
   met: deleted chunks vanish from search and SQLite in the same call to
   `delete_document`, confirmed by a pipeline-level test independent of the
   store-level tests already covering the primitives.
+- **E2** ✅ — `sync_path()` reconciliation and near-duplicate detection.
+  `Rag.sync_path(root, apply=False)` walks a directory and classifies every
+  `source_uri` against the store's current documents into added / updated
+  / unchanged / deleted, by the same `content_hash` comparison `ingest()`
+  already does; `apply=True` executes the plan (`ingest()` for added and
+  updated, `delete_document()` for deleted) and refuses to run at all —
+  writing nothing, not even the safe adds — if the deletions exceed
+  `max_delete_fraction` (default 50%) of the store's document count, so a
+  mistyped root or an unmounted volume cannot silently empty the corpus
+  (plan.md §18 F9). `over_delete_guard` on the returned `SyncReport` is
+  computed on a dry run too, so the condition is visible before `apply`
+  is ever passed. New `nanorag sync ROOT [--apply]
+  [--max-delete-fraction F]` CLI command, offline like `ingest` — landed
+  in the same session as `sync_path()` itself, the same norm D3 set for
+  `nanorag eval`. Near-duplicate detection (plan.md §18 F13): a document
+  opts a chunk into the check via `metadata["nanorag.dedup_group"]`; a
+  chunk found ≥ 0.97 cosine-similar to an already-indexed chunk in the
+  same group — a different document, `exclude` keeps a document from ever
+  matching its own current or prior chunks — is kept, never dropped
+  (dropping would rotate every later chunk's id for no reason and break a
+  citation already pointing at it), but tagged
+  `metadata["nanorag.duplicate_of"]` with the winner's chunk id. Bounded
+  cost, the F13 requirement: a document that never sets the group key is
+  never compared against anything, and one that does is compared only
+  within its own group (found via the existing `filter_chunk_ids`
+  metadata filter, not a new index) — never against the whole corpus.
+  Documented limit: comparisons run against chunks already persisted
+  before this ingest call, so two never-before-seen near-duplicate
+  documents landing in the same batch do not catch each other.
 
 ## Out of scope through 1.0
 

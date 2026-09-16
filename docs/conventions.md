@@ -32,7 +32,11 @@ Frozen dataclasses (`frozen=True, slots=True`): `Document`, `Chunk`,
 `ScoredChunk`, `Answer` (plus `Citation`, `Usage`, `Timings`). One `Chunk`
 type — `ScoredChunk` wraps rather than subclasses. Validating `__post_init__`.
 Metadata is a flat `str -> JSON scalar` map; nesting breaks filter compilation.
-Reserved `nanorag.*` metadata key namespace.
+Reserved `nanorag.*` metadata key namespace: `nanorag.mime` (a loader's own
+guess), `nanorag.heading_path` (`MarkdownChunker`), `nanorag.dedup_group` /
+`nanorag.duplicate_of` (near-duplicate detection, session E2 — a document
+opts a chunk-level check in by setting the group key; a flagged chunk is
+kept, tagged with the winner's id, never dropped).
 
 ## Determinism & hashing
 
@@ -70,7 +74,11 @@ only inside the facade, that is a bug. `delete_document(doc_id)` and
 each is a thin sequence over `SqliteDocumentStore.delete_document` and
 `NumpyVectorStore.delete`/`compact`, which already do the real work
 (cascade, tombstone mask) — the facade only wires the two stores together
-so a deletion is never visible in one but not the other.
+so a deletion is never visible in one but not the other. `sync_path()`
+(session E2) composes one level up: it classifies a directory walk against
+the store's current documents, then calls `ingest()` and `delete_document()`
+themselves for the actual writes — it owns no write path of its own, only
+the add/update/delete decision plus the delete-fraction guard.
 
 ## Public types
 

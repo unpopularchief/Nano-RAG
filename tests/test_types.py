@@ -11,6 +11,7 @@ from nanorag.types import (
     IngestReport,
     LoadIssue,
     ScoredChunk,
+    SyncReport,
     Timings,
     Usage,
 )
@@ -304,3 +305,42 @@ def test_ingest_report_to_dict_is_json_serialisable():
     assert restored["loaded"][0]["doc_id"] == "d0"
     assert restored["skipped"][0]["reason"] == "unrecognized extension"
     assert restored["failed"][0]["source_uri"] == "bad.txt"
+
+
+# --- SyncReport ----------------------------------------------------------
+
+
+def test_sync_report_rejects_non_tuple_fields():
+    with pytest.raises(TypeError):
+        SyncReport(
+            added=[],
+            updated=(),
+            unchanged=(),
+            deleted=(),
+            skipped=(),
+            failed=(),
+            applied=False,
+            over_delete_guard=False,
+        )
+
+
+def test_sync_report_to_dict_is_json_serialisable():
+    report = SyncReport(
+        added=("new.md",),
+        updated=("changed.md",),
+        unchanged=("same.md",),
+        deleted=("gone.md",),
+        skipped=(LoadIssue("img.png", "unrecognized extension"),),
+        failed=(LoadIssue("bad.txt", "contains a NUL byte"),),
+        applied=True,
+        over_delete_guard=False,
+    )
+    restored = json.loads(json.dumps(report.to_dict()))
+    assert restored["added"] == ["new.md"]
+    assert restored["updated"] == ["changed.md"]
+    assert restored["unchanged"] == ["same.md"]
+    assert restored["deleted"] == ["gone.md"]
+    assert restored["skipped"][0]["reason"] == "unrecognized extension"
+    assert restored["failed"][0]["source_uri"] == "bad.txt"
+    assert restored["applied"] is True
+    assert restored["over_delete_guard"] is False

@@ -465,3 +465,65 @@ class IngestReport:
             "skipped": [i.to_dict() for i in self.skipped],
             "failed": [i.to_dict() for i in self.failed],
         }
+
+
+@dataclass(frozen=True, slots=True)
+class SyncReport:
+    """The outcome of reconciling the store against one directory tree.
+
+    Produced by ``Rag.sync_path`` (Phase E, session E2): a dry run (the
+    default) returns this as a plan with nothing written; ``apply=True``
+    executes it first.
+
+    Attributes
+    ----------
+    added, updated, unchanged, deleted
+        Source URIs in each category, from comparing the store's current
+        documents against a fresh walk of the root: ``added`` is on disk
+        but not yet stored; ``updated`` is in both with a changed
+        ``content_hash``; ``unchanged`` is in both with the same hash (a
+        no-op either way); ``deleted`` is stored but no longer produced
+        by the walk.
+    skipped, failed
+        As :class:`IngestReport` — sources the walk did not attempt or
+        could not load. Never affects the four lists above.
+    applied
+        ``False`` on a dry run: nothing was written, the lists above are
+        the plan. ``True``: the store now matches the walk (unless
+        ``over_delete_guard`` blocked it — see below).
+    over_delete_guard
+        ``True`` when ``deleted`` exceeds the sync's ``max_delete_fraction``
+        of the store's document count from *before* this sync — the
+        condition under which ``apply=True`` refuses to run (plan.md §18
+        F9). Computed on every sync, dry run or not, so a caller can see a
+        would-be-blocked deletion without ever passing ``apply=True``.
+
+    """
+
+    added: tuple[str, ...]
+    updated: tuple[str, ...]
+    unchanged: tuple[str, ...]
+    deleted: tuple[str, ...]
+    skipped: tuple[LoadIssue, ...]
+    failed: tuple[LoadIssue, ...]
+    applied: bool
+    over_delete_guard: bool
+
+    def __post_init__(self) -> None:
+        """Validate the field values (see the class docstring)."""
+        for name in ("added", "updated", "unchanged", "deleted", "skipped", "failed"):
+            if not isinstance(getattr(self, name), tuple):
+                raise TypeError(f"SyncReport.{name} must be a tuple")
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-serialisable dict of this report."""
+        return {
+            "added": list(self.added),
+            "updated": list(self.updated),
+            "unchanged": list(self.unchanged),
+            "deleted": list(self.deleted),
+            "skipped": [i.to_dict() for i in self.skipped],
+            "failed": [i.to_dict() for i in self.failed],
+            "applied": self.applied,
+            "over_delete_guard": self.over_delete_guard,
+        }

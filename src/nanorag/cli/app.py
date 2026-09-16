@@ -1,7 +1,7 @@
 """The ``nanorag`` command: argument parsing, dispatch, exit codes.
 
-Four subcommands — ``ingest``, ``query``, ``inspect``, ``eval`` — each a
-module in this package with the same three-function shape:
+Five subcommands — ``ingest``, ``query``, ``inspect``, ``eval``, ``sync`` —
+each a module in this package with the same three-function shape:
 ``run(args, settings)`` returns a JSON-serialisable payload,
 ``render(payload)`` turns that payload into the human-readable text, and
 ``exit_code(payload)`` says how the process ends once it has been printed.
@@ -45,7 +45,7 @@ from typing import Any
 
 from nanorag import __version__
 from nanorag.cli import eval as eval_command
-from nanorag.cli import ingest, inspect, query
+from nanorag.cli import ingest, inspect, query, sync
 from nanorag.config import Settings
 from nanorag.errors import ConfigError, NanoRagError, ProviderError, StoreError
 
@@ -64,6 +64,7 @@ _COMMANDS = {
     "query": query,
     "inspect": inspect,
     "eval": eval_command,
+    "sync": sync,
 }
 
 

@@ -1,9 +1,9 @@
 # Command line
 
-`nanorag ingest | query | inspect | eval` — the library's read and write
-paths, and its evaluation harness, as a command. Installed as the `nanorag`
-console script by the package (`uv run nanorag …` inside this repository);
-also runnable as `python -m nanorag.cli`.
+`nanorag ingest | query | inspect | eval | sync` — the library's read and
+write paths, its evaluation harness, and its durability tool, as a command.
+Installed as the `nanorag` console script by the package (`uv run nanorag …`
+inside this repository); also runnable as `python -m nanorag.cli`.
 
 ```bash
 nanorag ingest docs/ --glob "**/*.md"          # offline: local embeddings, no key
@@ -11,6 +11,8 @@ nanorag query "Where do API keys come from?"   # one generation call
 nanorag query "…" --json | jq .answer.citations
 nanorag inspect                                # what the index holds; loads no model
 nanorag eval datasets/nanorag-docs/dev.jsonl   # offline retrieval eval; --thresholds gates
+nanorag sync docs/ --glob "**/*.md"            # dry run: what would add/update/delete
+nanorag sync docs/ --glob "**/*.md" --apply    # reconcile the index for real
 ```
 
 ## Contract
@@ -29,7 +31,7 @@ nanorag eval datasets/nanorag-docs/dev.jsonl   # offline retrieval eval; --thres
   | `2` | usage error: bad arguments, an ingest root that is not a directory, `-k 0`, a `--filter` that is not a JSON object | `argparse` |
   | `3` | configuration: no generator available, the `[local]` extra missing, an unknown profile or setting | `ConfigError` |
   | `4` | the provider: rejected key, spent quota, rate limit or transient failure that survived the retries and the fallback chain, retired model | `ProviderError` and subclasses |
-  | `5` | the store: index built with a different embedding model, no index to inspect | `StoreError`, `IndexModelMismatch` |
+  | `5` | the store: index built with a different embedding model, no index to inspect, `sync --apply` would delete past `--max-delete-fraction` | `StoreError`, `IndexModelMismatch` |
   | `6` | `eval --thresholds` only: a metric fell below a committed threshold (the report is still printed) | |
 
   A malformed dataset or thresholds file (`EvaluationError`) exits `1`.
@@ -229,9 +231,54 @@ so a rate-limited free tier still yields a report over what completed);
 each item row carries the answer `text`, its `citations`, provider and
 tokens, or an `error`.
 
+## `nanorag sync ROOT`
+
+Reconcile the index against a fresh walk of `ROOT` (Phase E, `Rag.sync_path`):
+a `source_uri` on disk but not in the index is an addition, one in both with
+a changed `content_hash` is an update, one in the index but no longer on
+disk is a deletion. **Dry run by default** — nothing is written, the payload
+is the plan; pass `--apply` to execute it. Offline like `ingest`: no
+generator is constructed. `added`/`updated` go through the same change
+detection as `ingest` (a re-sync of a large, mostly-unchanged corpus is
+cheap), and `deleted` cascades through SQLite and tombstones the in-memory
+index in the same call as `Rag.delete_document`.
+
+| Option | Effect |
+| --- | --- |
+| `--glob PATTERN`, `--ignore PATTERN` | same as `ingest` |
+| `--apply` | execute the plan (default: report only) |
+| `--max-delete-fraction FRACTION` | `--apply` refuses if more than this fraction of the index's documents would be deleted (default `0.5`) — a mistyped `ROOT` or an unmounted volume must not silently empty the corpus |
+
+```json
+{
+  "added": ["c.md"],
+  "updated": ["a.md"],
+  "unchanged": ["b.md"],
+  "deleted": ["old.md"],
+  "skipped": [],
+  "failed": [],
+  "applied": false,
+  "over_delete_guard": false,
+  "persist_dir": ".nanorag",
+  "root": "docs",
+  "glob": "**/*.md",
+  "ignore": []
+}
+```
+
+`over_delete_guard` is `true` whenever `deleted` exceeds `--max-delete-fraction`
+of the index's document count from before this sync — reported on a dry run
+too (a warning on stderr), so the condition is visible before `--apply` is
+ever passed. With `--apply`, tripping the guard raises instead of writing
+anything: a sync either fully succeeds (`added`/`updated`/`deleted` all
+applied) or fully does not.
+
 ## Schema stability
 
-The payload keys above are the contract from the Phase D release (`v0.3.0`,
-Gate D): from then on a key is only added, never renamed or removed, without
-a minor version bump (the project is `0.x`). `answer` follows the stricter
-freeze already on `Answer` itself.
+The `ingest`/`query`/`inspect`/`eval` payload keys above are the contract
+from the Phase D release (`v0.3.0`, Gate D): from then on a key is only
+added, never renamed or removed, without a minor version bump (the project
+is `0.x`). `answer` follows the stricter freeze already on `Answer` itself.
+`sync`'s payload (Phase E) is not yet frozen — it stays informally unstable
+until Gate E, the same posture `IngestReport`/`SyncReport` have in
+`docs/conventions.md`.

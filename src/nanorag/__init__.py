@@ -38,6 +38,7 @@ from nanorag.types import (
     JsonScalar,
     LoadIssue,
     ScoredChunk,
+    SyncReport,
     Timings,
     Usage,
 )
@@ -74,6 +75,7 @@ __all__ = [
     "Answer",
     "IngestReport",
     "LoadIssue",
+    "SyncReport",
     "JsonScalar",
 ]
 

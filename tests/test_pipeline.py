@@ -15,10 +15,12 @@ from nanorag import Rag
 from nanorag.chunking import RecursiveChunker
 from nanorag.config import Settings
 from nanorag.context import ContextBuilder
-from nanorag.errors import ConfigError, IndexModelMismatch
+from nanorag.errors import ConfigError, IndexModelMismatch, StoreError
 from nanorag.generation import FallbackGenerator, Generation
 from nanorag.hashing import content_hash, stable_doc_id
 from nanorag.pipeline import (
+    DEDUP_GROUP_KEY,
+    DEDUP_OF_KEY,
     DEFAULT_MIN_SCORE,
     NO_PROVIDER,
     context_budget,
@@ -54,12 +56,13 @@ def _write_corpus(root):
     return root
 
 
-def _doc(uri, text):
+def _doc(uri, text, metadata=None):
     return Document(
         doc_id=stable_doc_id(uri),
         source_uri=uri,
         text=text,
         content_hash=content_hash(text),
+        metadata=metadata or {},
     )
 
 
@@ -308,6 +311,162 @@ def test_compact_after_delete_leaves_search_unchanged():
     # The reclaimed row is reused cleanly by a later ingest (plan.md §6).
     rag.ingest([_doc("c.txt", "zeta eta theta")])
     assert len(rag.vectors) == 2
+
+
+# --- sync_path -----------------------------------------------------------------
+
+
+def test_sync_path_dry_run_reports_the_plan_without_writing_anything(tmp_path):
+    rag = _rag()
+    (tmp_path / "a.txt").write_text("alpha beta", encoding="utf-8")
+    (tmp_path / "b.txt").write_text("delta epsilon", encoding="utf-8")
+    rag.sync_path(tmp_path, apply=True)
+
+    (tmp_path / "b.txt").write_text("changed content entirely", encoding="utf-8")
+    (tmp_path / "a.txt").unlink()
+    (tmp_path / "c.txt").write_text("zeta eta theta", encoding="utf-8")
+
+    report = rag.sync_path(tmp_path)
+
+    assert report.added == ("c.txt",)
+    assert report.updated == ("b.txt",)
+    assert report.unchanged == ()
+    assert report.deleted == ("a.txt",)
+    assert report.applied is False
+    # Nothing was actually written: the store still matches the first sync.
+    assert {d.source_uri for d in rag.docs.iter_documents()} == {"a.txt", "b.txt"}
+    assert rag.docs.get_document(stable_doc_id("b.txt")).text == "delta epsilon"
+
+
+def test_sync_path_apply_executes_add_update_and_delete():
+    rag = _rag()
+    rag.ingest([_doc("a.txt", "alpha beta"), _doc("b.txt", "delta epsilon")])
+
+    class _FakeLoader:
+        def load_path(self, root, *, glob, ignore):
+            from nanorag.types import IngestReport
+
+            return IngestReport(
+                loaded=(
+                    _doc("b.txt", "changed content entirely"),
+                    _doc("c.txt", "zeta eta theta"),
+                ),
+                skipped=(),
+                failed=(),
+            )
+
+    rag.loader = _FakeLoader()
+    report = rag.sync_path("ignored")
+
+    assert report.added == ("c.txt",)
+    assert report.updated == ("b.txt",)
+    assert report.deleted == ("a.txt",)
+    assert report.applied is False
+
+    applied = rag.sync_path("ignored", apply=True)
+    assert applied.applied is True
+    assert {d.source_uri for d in rag.docs.iter_documents()} == {"b.txt", "c.txt"}
+    assert rag.docs.get_document(stable_doc_id("b.txt")).text == (
+        "changed content entirely"
+    )
+    hits = rag.retrieve("alpha beta", k=5)
+    assert stable_doc_id("a.txt") not in {h.chunk.doc_id for h in hits}
+
+
+def test_sync_path_apply_refuses_past_max_delete_fraction(tmp_path):
+    rag = _rag()
+    for name in ("a.txt", "b.txt", "c.txt", "d.txt"):
+        (tmp_path / name).write_text(name, encoding="utf-8")
+    rag.sync_path(tmp_path, apply=True)
+    assert rag.docs.count_documents() == 4
+
+    for name in ("a.txt", "b.txt", "c.txt"):  # 3/4 = 75% > the 50% default
+        (tmp_path / name).unlink()
+
+    dry = rag.sync_path(tmp_path)
+    assert dry.over_delete_guard is True
+    assert dry.applied is False
+
+    with pytest.raises(StoreError):
+        rag.sync_path(tmp_path, apply=True)
+    # A blocked sync writes nothing at all -- not even the safe adds/updates.
+    assert rag.docs.count_documents() == 4
+
+    applied = rag.sync_path(tmp_path, apply=True, max_delete_fraction=0.9)
+    assert applied.applied is True
+    assert rag.docs.count_documents() == 1
+
+
+def test_sync_path_rejects_an_out_of_range_max_delete_fraction(tmp_path):
+    rag = _rag()
+    with pytest.raises(ConfigError):
+        rag.sync_path(tmp_path, max_delete_fraction=1.5)
+    with pytest.raises(ConfigError):
+        rag.sync_path(tmp_path, max_delete_fraction=-0.1)
+
+
+# --- near-duplicate detection (plan.md §18 F13) ---------------------------------
+
+
+def test_near_duplicate_chunk_is_kept_and_tagged_with_the_winner():
+    rag = _rag()
+    rag.ingest([_doc("a.txt", "alpha beta gamma", {DEDUP_GROUP_KEY: "g"})])
+    winner_id = rag.docs.get_chunks(stable_doc_id("a.txt"))[0].chunk_id
+
+    rag.ingest([_doc("b.txt", "alpha beta gamma", {DEDUP_GROUP_KEY: "g"})])
+
+    loser = rag.docs.get_chunks(stable_doc_id("b.txt"))[0]
+    assert loser.metadata[DEDUP_OF_KEY] == winner_id
+    # The loser is kept, not dropped: still searchable, still in SQLite.
+    assert len(rag.vectors) == 2
+    assert rag.docs.count_chunks() == 2
+
+
+def test_near_duplicate_detection_is_a_noop_without_a_dedup_group():
+    rag = _rag()
+    rag.ingest([_doc("a.txt", "alpha beta gamma")])
+    rag.ingest([_doc("b.txt", "alpha beta gamma")])
+
+    for chunk in rag.docs.get_chunks(stable_doc_id("b.txt")):
+        assert DEDUP_OF_KEY not in chunk.metadata
+
+
+def test_tag_near_duplicates_exclude_keeps_a_chunk_from_matching_its_own_document():
+    # _tag_near_duplicates is called mid-ingest with `exclude` set to this
+    # document's own current and prior chunk ids (plan.md §18 F13: a chunk
+    # is never compared against its own document). Exercised directly here
+    # because a same-document match can only arise via a same-content
+    # re-ingest, which is awkward to stage through the public API alone.
+    rag = _rag()
+    rag.ingest([_doc("seed.txt", "alpha beta gamma", {DEDUP_GROUP_KEY: "g"})])
+    seed_id = rag.docs.get_chunks(stable_doc_id("seed.txt"))[0].chunk_id
+
+    doc = _doc("a.txt", "alpha beta gamma", {DEDUP_GROUP_KEY: "g"})
+    chunk = Chunk(
+        chunk_id="a-chunk",
+        doc_id=doc.doc_id,
+        ordinal=0,
+        text="alpha beta gamma",
+        start_char=0,
+        end_char=16,
+        token_count=3,
+    )
+    vector = rag.embedder.embed(["alpha beta gamma"])
+
+    excluded = rag._tag_near_duplicates(doc, [chunk], vector, exclude={seed_id})
+    assert DEDUP_OF_KEY not in excluded[0].metadata
+
+    included = rag._tag_near_duplicates(doc, [chunk], vector, exclude=set())
+    assert included[0].metadata[DEDUP_OF_KEY] == seed_id
+
+
+def test_near_duplicate_below_threshold_is_not_flagged():
+    rag = _rag(duplicate_threshold=0.999)
+    rag.ingest([_doc("a.txt", "alpha beta gamma", {DEDUP_GROUP_KEY: "g"})])
+    rag.ingest([_doc("b.txt", "alpha beta gamma delta", {DEDUP_GROUP_KEY: "g"})])
+
+    for chunk in rag.docs.get_chunks(stable_doc_id("b.txt")):
+        assert DEDUP_OF_KEY not in chunk.metadata
 
 
 # --- read path: the e2e with fakes --------------------------------------------
