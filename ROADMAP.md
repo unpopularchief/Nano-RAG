@@ -10,7 +10,7 @@ contiguous release list.
 | **A — Foundation** | `v0.0.1` | Repo installs, lints, type-checks, tests, builds a wheel on Linux + Windows. Core data types. | **done; Gate A passed** |
 | **B — Corpus to index** | `v0.0.4` | Real files → durable, searchable vectors. Fully offline. | **done; Gate B passed** |
 | **C — First answers (MVP)** | `v0.1.0` | Documents in, cited answer out — free key or fully offline. First public release. | **done — `v0.1.0`, Gate C passed** |
-| **D — Trust** | `v0.3.0` | Citations resolving to text spans, a CLI, quality as numbers in CI (≥ 200-item eval set). | **D1–D3 done — Gate D review next** |
+| **D — Trust** | `v0.3.0` | Citations resolving to text spans, a CLI, quality as numbers in CI (≥ 200-item eval set). | **done — `v0.3.0`, Gate D passed** |
 | **E — Durability** | `v0.4.0` | Re-ingesting a changed corpus is correct and cheap. | not started |
 | **F — Quality** | `v0.6.0` | Beat the Phase D baseline with evidence — reranking, BM25/hybrid, MMR. Negative results published. | not started |
 | **G — Reach** | `v0.7.0` | PDF/HTML loaders, external stores (Qdrant, pgvector), hosted embeddings — without touching the core. | not started |
@@ -226,8 +226,21 @@ contiguous release list.
   token cap, Gemini's rate limit) — a Gate D item, on a subset.
   Baseline committed in `thresholds.json` with a 0.05 band (≈ 2 SE at
   n = 317); everything in `docs/evaluation.md`.
-- **🚦 Gate D** — next: review against plan.md §9's Phase D block, decide
-  the API-model answer leg, tag `v0.3.0`.
+- **🚦 Gate D** ✅ — `v0.3.0`. Reviewed against plan.md §9's Phase D block:
+  all three checkpoints hold (≥ 95% marker resolution, stable CLI schema
+  and exit codes, a 341-item eval set with committed thresholds), and the
+  eval gate was re-verified on GitHub's own CI runner (not just locally)
+  at the post-D3 CRLF-fix commit (`0192ce3`) — green, reproducing
+  `thresholds.json` within tolerance
+  (Recall@5 0.836, Recall@10 0.880, MRR 0.658, nDCG@5 0.698). **The
+  free-tier API-model answer leg (Groq/Gemini) is scoped out of the gate,
+  not a blocker** — both hit quota/rate limits during D3 and neither had
+  recovered by this session; the chunk-default decision already rests on
+  the D3 sweep's retrieval metrics plus the completed Ollama leg pointing
+  the same direction, and re-running the API leg needs a `--limit`/
+  `--tags` flag on `nanorag eval` that doesn't exist yet — tracked as a
+  follow-up (see CHANGELOG `[0.3.0]`), not reopened as Phase D work.
+  Classifier bumped `3 - Alpha` → `4 - Beta`.
 
 ## Out of scope through 1.0
 

@@ -4,10 +4,9 @@ A small, readable, production-capable retrieval-augmented generation **engine**
 — not a framework. The goal is that you can read the whole thing in an
 afternoon, run it against your own documents, and operate it for free.
 
-> **Status: `v0.1.0` — the MVP. Phase C is done and Gate C has closed:
-> the query-path types (`Answer`, `Citation`, `Usage`, `Timings`) are
-> frozen, the abstention heuristic is locked by measurement, and the
-> quickstart runs three ways.** The package installs, lints, type-checks,
+> **Status: `v0.3.0` — Phase D is done and Gate D has closed: citations
+> resolve to text spans, there's a command line, and quality is a number
+> enforced in CI.** The package installs, lints, type-checks,
 > tests and builds a wheel on Linux and Windows. It loads real files
 > (`loaders/`), cleans and chunks them (`cleaning/`, `chunking/`), embeds
 > them locally (`embeddings/` — `fastembed`/ONNX, no torch, cached and

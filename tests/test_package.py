@@ -10,7 +10,7 @@ import nanorag
 
 
 def test_version_is_exposed():
-    assert nanorag.__version__ == "0.1.0"
+    assert nanorag.__version__ == "0.3.0"
 
 
 def test_public_names_are_importable_from_the_top_level():

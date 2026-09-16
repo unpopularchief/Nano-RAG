@@ -7,6 +7,43 @@ breaking changes bump the minor).
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-09-16
+
+Phase D: citations resolve to text spans, a command line, and quality is a
+number enforced in CI.
+
+### Gate D — decisions locked against plan.md §9's Phase D block
+
+- **D1–D3 checkpoints confirmed**: ≥ 95% marker resolution (21/22 ≈ 95.5%
+  on the fixture corpus), a stable documented CLI JSON schema with correct
+  exit codes, and a ≥ 200-item eval set (341, 317 answerable / 24
+  unanswerable) with committed thresholds.
+- **The eval gate was re-verified on GitHub's own runner, not just
+  locally**: `.github/workflows/eval.yml` triggered manually on `main` at
+  the CRLF-fix commit (`0192ce3`) — green
+  (run `35119521547`, 15m44s), reproducing the committed thresholds
+  (Recall@5 0.8360, Recall@10 0.8801, MRR 0.6584, nDCG@5 0.6978 against
+  `thresholds.json`'s 0.836 / 0.880 / 0.659 / 0.698, 0.05 tolerance) on a
+  fresh checkout on the actual CI infrastructure the gate depends on.
+- **The free-tier API-model answer-eval leg (Groq/Gemini) is scoped out
+  of Gate D, not a blocker.** Both legs failed on quota/rate limits during
+  D3 (Groq: daily cap after ~30 min; Gemini: rate-limited after 14/341
+  items) and neither had recovered by this session (Groq's daily cap
+  resets ~24h after the D3 run). Plan.md §9's Phase D Tests/Acceptance
+  bullets do not require this leg to complete — "answer eval against two
+  generators" is stated as design intent in the phase preamble, not a
+  gate criterion. The chunk-default decision (512/64 → 128/64) already
+  rests on the D3 sweep's retrieval metrics (offline, deterministic,
+  341 items) plus a *completed* Ollama 7B answer-eval leg pointing the
+  same direction (answer_rate 0.918 vs 0.785, citation_precision 0.690
+  vs 0.609). Re-running the API leg needs either a `--limit`/`--tags`
+  flag on `nanorag eval` (not yet built) or spreading the run across
+  days to stay under the daily cap — tracked in ROADMAP as a follow-up,
+  not reopened as Phase D work.
+- Version `0.3.0`; classifier `Development Status :: 3 - Alpha` →
+  `4 - Beta` (citations resolve, a CLI ships, and quality is measured and
+  gated in CI — no longer just a library skeleton).
+
 ### Added
 
 - `citations/parser.py` (Phase D, session D1): `parse_citations` resolves a
@@ -73,6 +110,18 @@ breaking changes bump the minor).
   even when the prompt shows `[n]`; before this, every citation in a
   correct answer from the primary provider went unresolved *and* uncounted
   (a validity rate of "no markers", not "0 %"), so nothing was logged.
+- **`pipeline.py::Rag.ingest` now normalizes each document's text (NFC +
+  LF via the existing `normalize_text`) before chunking**, matching what
+  `evaluation/datasets.py::load_corpus` already did for the eval corpus.
+  Without this, a CRLF checkout and an LF checkout of byte-identical
+  committed content chunked differently and retrieved differently — real
+  for every production ingest, not just an eval-path quirk. At D3's new
+  128-token chunk size the divergence was large enough to flip which
+  document a query's top hit came from; a stale-CRLF working tree exposed
+  it as a CI failure that a fresh clone didn't reproduce.
+  `tests/test_examples.py`'s citation-source assertion no longer hardcodes
+  which document lands at `[1]` (fragile regardless of this bug — a
+  chunk-size or doc-content change can legitimately move it).
 
 ## [0.1.0] — 2026-09-15
 
