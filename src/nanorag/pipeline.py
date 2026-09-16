@@ -38,6 +38,7 @@ from __future__ import annotations
 import logging
 import os
 from collections.abc import Callable, Iterable, Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -52,6 +53,7 @@ from nanorag.embeddings.base import Embedder
 from nanorag.errors import ConfigError, IndexModelMismatch
 from nanorag.generation.base import Generator
 from nanorag.generation.presets import GROQ, OLLAMA
+from nanorag.hashing import normalize_text
 from nanorag.loaders.directory import DirectoryLoader
 from nanorag.observability.timing import Timer
 from nanorag.prompting.templates import INSUFFICIENT_CONTEXT_TEXT, PromptBuilder
@@ -460,13 +462,23 @@ class Rag:
     def ingest(self, documents: Iterable[Document]) -> int:
         """Chunk, embed and persist *documents*; return the number of chunks.
 
-        Per document: the chunks replace any prior version's in one SQLite
+        Per document: the text is put through :func:`~nanorag.hashing.
+        normalize_text` (NFC + LF) before chunking — a ``Loader`` returns
+        raw bytes-as-read untouched (plan.md §6), so without this step a
+        CRLF checkout and an LF checkout of the identical content chunk
+        differently and retrieve differently. ``content_hash`` needs no
+        adjustment: it already runs the same normalisation internally, so
+        it is unchanged by this rewrite (``normalize_text`` is idempotent).
+        The chunks then replace any prior version's in one SQLite
         transaction, their vectors are persisted, and only then is the
         in-memory index updated — rows for chunks that no longer exist are
         dropped from it, new ones upserted (plan.md §18 F2 ordering).
         """
         total = 0
         for document in documents:
+            normalized = normalize_text(document.text)
+            if normalized != document.text:
+                document = replace(document, text=normalized)
             stale = {c.chunk_id for c in self.docs.get_chunks(document.doc_id)}
             chunks = self.chunker.chunk(document)
             ids = [c.chunk_id for c in chunks]
