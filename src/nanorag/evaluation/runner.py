@@ -49,6 +49,7 @@ from nanorag.generation.base import Generator
 from nanorag.generation.null import NullGenerator
 from nanorag.pipeline import Rag, insufficient_context, rerank_hits
 from nanorag.rerank.base import Reranker
+from nanorag.retrieval.base import Retriever
 from nanorag.store.sqlite_docs import SqliteDocumentStore
 from nanorag.tokens import TokenCounter
 
@@ -69,6 +70,7 @@ def build_rag(
     counter: TokenCounter | None = None,
     k: int = max(DEFAULT_KS),
     min_score: float | None = None,
+    retriever: Retriever | None = None,
     reranker: Reranker | None = None,
     retrieve_k: int | None = None,
 ) -> Rag:
@@ -76,11 +78,12 @@ def build_rag(
 
     *generator* defaults to a :class:`~nanorag.generation.NullGenerator` —
     enough for :func:`evaluate_retrieval`; :func:`evaluate_answers` needs a
-    real one. *reranker*/*retrieve_k* default to ``Rag``'s own defaults
-    (identity, no oversampling) — passed through so the Phase F reranking
-    sweep (``benchmarks/rerank_sweep.py``) can measure a real reranker
-    against the same harness the committed thresholds were measured with.
-    Everything else is passed straight to ``Rag``.
+    real one. *retriever*/*reranker*/*retrieve_k* default to ``Rag``'s own
+    defaults (dense, identity, no oversampling) — passed through so the
+    Phase F sweeps (``benchmarks/rerank_sweep.py``,
+    ``benchmarks/hybrid_sweep.py``) can measure a real retriever or
+    reranker against the same harness the committed thresholds were
+    measured with. Everything else is passed straight to ``Rag``.
     """
     rag = Rag(
         embedder=embedder,
@@ -90,6 +93,7 @@ def build_rag(
         counter=counter,
         k=k,
         min_score=min_score,
+        retriever=retriever,
         reranker=reranker,
         retrieve_k=retrieve_k,
     )
@@ -109,11 +113,12 @@ def evaluate_retrieval(
     Every aggregate is a plain mean over its population.
 
     Ranking metrics (recall/precision/hit-rate/mrr/ndcg) are graded on
-    ``rag``'s full read path including reranking — that is the point of
-    measuring a reranker's effect at all. Abstention is graded on the
-    retriever's own dense hits, matching ``Rag.query()`` exactly (plan.md
-    §18 F10: the floor is calibrated against the embedder's score scale,
-    which a reranker's score generally is not).
+    ``rag``'s full read path including retrieval and reranking — that is
+    the point of measuring a retriever's or reranker's effect at all.
+    Abstention is graded on ``rag.retriever``'s own hits, matching
+    ``Rag.query()`` exactly (plan.md §18 F10: the floor is calibrated
+    against the embedder's score scale, which neither a reranker's score
+    nor a non-dense retriever's is in general).
     """
     if not ks or any(k < 1 for k in ks):
         raise ValueError(f"ks must be non-empty positive integers, got {ks!r}")
@@ -125,10 +130,12 @@ def evaluate_retrieval(
     flagged_unanswerable: list[float] = []
 
     for item in dataset.items:
-        dense_hits = rag.retriever.retrieve(item.question, k=max(rag.retrieve_k, k_max))
-        hits = rerank_hits(rag.reranker, item.question, dense_hits, k_max)
+        primary_hits = rag.retriever.retrieve(
+            item.question, k=max(rag.retrieve_k, k_max)
+        )
+        hits = rerank_hits(rag.reranker, item.question, primary_hits, k_max)
         flagged = insufficient_context(
-            dense_hits[:k_max],
+            primary_hits[:k_max],
             min_results=rag.min_results,
             min_gap=rag.min_gap,
             min_score=rag.min_score,

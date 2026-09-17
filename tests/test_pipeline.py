@@ -40,7 +40,7 @@ from nanorag.retrieval import DenseRetriever
 from nanorag.store import SqliteDocumentStore
 from nanorag.tokens import HeuristicCounter
 from nanorag.types import Answer, Chunk, Document, ScoredChunk, Usage
-from tests.fakes import FakeEmbedder, FakeGenerator, FakeReranker
+from tests.fakes import FakeEmbedder, FakeGenerator, FakeReranker, FakeRetriever
 
 DIM = 256  # wide enough that the hashing fake has no accidental collisions
 
@@ -669,6 +669,57 @@ def test_retrieve_is_reproducible_from_the_retriever_and_reranker_alone():
     )
     assert rag.retrieve("alpha", k=1) == by_hand
     assert rag.retrieve("alpha", k=1)[0].chunk.doc_id == stable_doc_id("a.txt")
+
+
+# --- retrieval: retriever wiring (plan.md §9 Phase F session F2) -------------
+
+
+def test_default_retriever_is_dense_over_the_wired_stores():
+    rag = _rag()
+    assert isinstance(rag.retriever, DenseRetriever)
+
+
+def test_a_custom_retriever_is_used_by_retrieve_and_its_filter_and_k_forwarded():
+    fake = FakeRetriever([_scored_chunk("x.txt", "a chunk", "hybrid:rrf", 0.5)])
+    rag = _rag(retriever=fake, retrieve_k=2)
+    rag.ingest([_doc("a.txt", "alpha")])
+
+    hits = rag.retrieve("the question", k=2, filter={"kind": "x"})
+
+    assert [h.chunk.text for h in hits] == ["a chunk"]
+    assert all(h.source == "hybrid:rrf" for h in hits)
+    (call,) = fake.calls
+    assert call == ("the question", 2, {"kind": "x"})
+
+
+def test_query_abstention_is_judged_on_the_custom_retrievers_own_hits():
+    # A non-dense retriever's score is on its own scale too (plan.md §9
+    # Phase F session F2's extension of F10's existing reranker caveat):
+    # `min_score` must be read against *this* retriever's hits, never the
+    # reranked ones, exactly like the dense-retriever case above it.
+    poor_hit = _scored_chunk("a.txt", "alpha beta gamma", "bm25", 0.01)
+    fake = FakeRetriever([poor_hit])
+    rag = _rag(retriever=fake, min_score=0.1)
+    rag.ingest([_doc("a.txt", "alpha beta gamma")])
+
+    assert rag.query("alpha beta gamma", k=1).insufficient_context is True
+
+    rag.min_score = None
+    assert rag.query("alpha beta gamma", k=1).insufficient_context is False
+
+
+def _scored_chunk(uri, text, source, score):
+    doc = _doc(uri, text)
+    chunk = Chunk(
+        chunk_id=f"{doc.doc_id}-0",
+        doc_id=doc.doc_id,
+        ordinal=0,
+        text=text,
+        start_char=0,
+        end_char=len(text),
+        token_count=len(text.split()),
+    )
+    return ScoredChunk(chunk=chunk, score=score, source=source)
 
 
 # --- reranking: retrieve-k / rerank-to-n wiring (plan.md §9 Phase F) -----------

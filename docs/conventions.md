@@ -82,7 +82,10 @@ the add/update/delete decision plus the delete-fraction guard. `retrieve()`
 (Phase F, session F1) is the same shape again: it fetches from
 `self.retriever`, hands the result to `self.reranker`, and catches exactly
 one error type around that second call — a test reproduces it from
-`rag.retriever`/`rag.reranker` alone, same as `query()`.
+`rag.retriever`/`rag.reranker` alone, same as `query()`. `self.retriever`
+itself is a plain, overridable attribute since session F2 (mirroring
+`self.reranker`) — `DenseRetriever` by default, or a `Bm25Retriever`/
+`HybridRetriever` wired in by hand.
 
 ## Reranking (Phase F, session F1)
 
@@ -126,6 +129,46 @@ one error type around that second call — a test reproduces it from
   ranking metrics; a real bug found by the F1 sweep before this fix
   landed, not a hypothetical.
 
+## Hybrid retrieval (Phase F, session F2)
+
+- `Retriever` (`retrieval/base.py`) is a `Protocol`: `retrieve(query, k,
+  filter) -> list[ScoredChunk]`, written now that a second and third
+  implementation exist (plan.md §15 #1) — `DenseRetriever` (Phase C),
+  `Bm25Retriever` and `HybridRetriever` (session F2). `Rag.retriever` is a
+  plain overridable attribute defaulting to `DenseRetriever`, the same
+  pattern `Rag.reranker` already established for `IdentityReranker`.
+- **`Bm25Retriever` is SQLite FTS5 with a capability check, not an
+  assumption.** `SqliteDocumentStore` tries to create a `chunks_fts`
+  virtual table at open time and records whether it worked as
+  `fts5_available`; `AFTER INSERT`/`AFTER DELETE` triggers on `chunks` (with
+  `PRAGMA recursive_triggers = ON`, needed for the trigger to fire on a
+  foreign-key-cascaded delete too) keep it in sync automatically, so no
+  write-path code has to know it exists. When FTS5 is unavailable,
+  `Bm25Retriever` falls back to an in-memory Okapi BM25 over
+  `docs.iter_chunks()`, recomputed per call rather than indexed — zero new
+  dependencies either way (FTS5 ships in SQLite itself; the fallback is
+  `re` + the already-core `numpy`).
+- **`HybridRetriever` fuses any two or more retrievers by Reciprocal Rank
+  Fusion** — rank-only, never raw score, because dense and BM25 scores sit
+  on incomparable scales. `candidate_k` is retrieval's own "retrieve wide,
+  keep narrow" knob, the same idea `Rag.retrieve_k` applies to reranking.
+- **Enabled by default only if it beats the Phase D baseline** (plan.md §9
+  Phase F Acceptance) — measured with `benchmarks/hybrid_sweep.py` against
+  the same corpus and thresholds every other Phase D/F sweep uses. BM25
+  alone and RRF hybrid both clear the bar by a wide margin on ranking
+  metrics, but neither is wired into `from_defaults()`'s default: unlike
+  F1's reranker (a model-loading cost), this is a genuine, currently
+  unmitigated regression in abstention quality (see below) —
+  `docs/evaluation.md` "Hybrid retrieval" has the full numbers and the
+  one-liner to wire either in by hand.
+- **Abstention generalises the same way F1 already forced for reranker
+  scores**: judged on `self.retriever`'s own hits, never the reranked ones,
+  and `min_score`/`min_gap` are only meaningful on *that retriever's* score
+  scale. A non-dense `self.retriever` (BM25, RRF) is exactly as
+  uncalibrated against the measured dense floor as a reranker's score is —
+  confirmed by the F2 sweep, which measured `false_abstain_rate = 1.000`
+  for every hybrid row before disabling `min_score` for them.
+
 ## Public types
 
 `Answer`, `Citation`, `Usage` and `Timings` are frozen since `v0.1.0`
@@ -138,11 +181,16 @@ contract: a caller never parses `text` to learn any of them.
 ## Abstention
 
 `insufficient_context()` is a tunable heuristic, never a guarantee. Its
-thresholds live on the embedder's score scale, so `Rag()` ships every
-optional check off and only `from_defaults()` sets the floor measured for
-the default embedder. Anything that changes the embedder re-measures
-before it changes the default (the Gate C measurement is recorded in the
-function docstring and README Limits).
+thresholds live on `self.retriever`'s own score scale — the default
+embedder's cosine scale for the default `DenseRetriever` — so `Rag()` ships
+every optional check off and only `from_defaults()` sets the floor measured
+for the default embedder/retriever pair. Anything that changes the
+embedder, or swaps in a non-dense retriever (`Bm25Retriever`,
+`HybridRetriever` — plan.md §9 Phase F session F2), re-measures before it
+changes what `min_score`/`min_gap` mean (the Gate C measurement for the
+default pair is recorded in the function docstring and README Limits; the
+F2 sweep found no such floor yet exists for BM25/RRF scores —
+`docs/evaluation.md` "Hybrid retrieval").
 
 ## Configuration
 

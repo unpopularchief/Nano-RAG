@@ -12,6 +12,10 @@ no real clock (plan.md §12).
   instead of blocking.
 - ``FakeReranker`` — a ``Reranker`` (plan.md §9 Phase F) that re-scores by a
   scripted function, or raises a scripted error, and records every call.
+- ``FakeRetriever`` — a ``Retriever`` (plan.md §9 Phase F session F2) that
+  returns a scripted, fixed hit list regardless of query, and records every
+  call — how ``HybridRetriever``'s RRF fusion is tested without a real
+  index.
 """
 
 from __future__ import annotations
@@ -24,6 +28,7 @@ import numpy as np
 from nanorag.generation.base import Generation
 from nanorag.hashing import normalize_text
 from nanorag.prompting.templates import Prompt
+from nanorag.store.filters import Filter
 from nanorag.types import ScoredChunk, Usage
 
 
@@ -218,3 +223,31 @@ class FakeReranker:
             ]
         rescored.sort(key=lambda h: h.score, reverse=True)
         return rescored[:top_n]
+
+
+class FakeRetriever:
+    """A ``Retriever`` (plan.md §9 Phase F session F2) with a scripted hit list.
+
+    Satisfies ``nanorag.retrieval.base.Retriever``. Ignores *query* and
+    returns ``hits[:k]`` unchanged (already scored/ordered by the test) so
+    ``HybridRetriever``'s fusion arithmetic can be driven by hand-picked
+    ranks instead of a real index. Every call is recorded as
+    ``(query, k, filter)``.
+
+    Parameters
+    ----------
+    hits
+        The fixed result list, most-relevant first, returned (truncated to
+        *k*) by every call.
+    """
+
+    def __init__(self, hits: Sequence[ScoredChunk]) -> None:
+        self.hits = list(hits)
+        self.calls: list[tuple[str, int | None, Filter | None]] = []
+
+    def retrieve(
+        self, query: str, k: int | None = None, filter: Filter | None = None
+    ) -> list[ScoredChunk]:
+        """Record the call; return ``self.hits[:k]`` (or all of them)."""
+        self.calls.append((query, k, filter))
+        return self.hits[:k] if k is not None else list(self.hits)

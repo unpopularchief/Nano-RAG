@@ -9,6 +9,24 @@ breaking changes bump the minor).
 
 ### Added
 
+- **Phase F, session F2 — hybrid retrieval.** New `Retriever` protocol
+  (`retrieval/base.py`, `retrieve(query, k, filter) -> list[ScoredChunk]`,
+  written now that `DenseRetriever` has two siblings); `Bm25Retriever`
+  (lexical search via SQLite FTS5, a capability check at store-open time —
+  `SqliteDocumentStore.fts5_available` — with a NumPy Okapi BM25 fallback
+  computed from scratch when FTS5 is unavailable; zero new dependencies
+  either way); `HybridRetriever` (Reciprocal Rank Fusion over any two or
+  more retrievers, `source="hybrid:rrf"`). `Rag` gained an overridable
+  `retriever=` constructor parameter (default `DenseRetriever`, mirroring
+  `reranker=`'s pattern) so a caller can wire in `Bm25Retriever` or
+  `HybridRetriever` without hand-assembling the rest of `Rag`.
+  `SqliteDocumentStore` gained a `chunks_fts` virtual table kept in sync
+  with `chunks` by triggers (needs `PRAGMA recursive_triggers = ON` to fire
+  on a foreign-key-cascaded delete) and a `search_bm25()` method.
+- `benchmarks/hybrid_sweep.py`, measuring dense-only vs. BM25-only vs. RRF
+  hybrid against the same committed corpus/thresholds every other Phase
+  D/F sweep uses (see `docs/evaluation.md` "Hybrid retrieval" for the
+  numbers).
 - **Phase F, session F1 — reranking.** New `rerank/` package behind a
   `Reranker` protocol (`rerank(query, hits, top_n) -> list[ScoredChunk]`):
   `IdentityReranker` (the default — a pure slice, no re-scoring, so `Rag`
@@ -30,9 +48,16 @@ breaking changes bump the minor).
 
 ### Changed
 
-- `nanorag.evaluation.build_rag` accepts `reranker=`/`retrieve_k=`,
-  passed straight through to `Rag`, so the eval harness can measure a
-  real reranker the same way a user would get it.
+- `nanorag.evaluation.build_rag` accepts `retriever=` alongside
+  `reranker=`/`retrieve_k=`, passed straight through to `Rag`, so the eval
+  harness can measure a real retriever or reranker the same way a user
+  would get it.
+- `Rag.query()`'s and `evaluate_retrieval()`'s abstention docstrings and
+  internal variable naming (`dense_hits` → `primary_hits`) no longer
+  assume the wired retriever is dense — `min_score`/`min_gap` are
+  documented as meaningful only on *whichever* retriever's score scale is
+  actually in play (plan.md §18 F10, generalising the caveat F1 already
+  established for reranker scores).
 
 ### Fixed
 

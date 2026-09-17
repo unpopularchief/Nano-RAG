@@ -336,6 +336,95 @@ local cross-encoder is preferred... if it matches within noise"), is a
 named follow-up, not a Gate F blocker — the local cross-encoder's own
 result already stands on its own measured merit.
 
+## Hybrid retrieval (Phase F, session F2)
+
+**Measured with `benchmarks/hybrid_sweep.py`**, on the same committed
+corpus, thresholds and 128/64 chunker default as above — the "dense
+(baseline)" row reproduces `thresholds.json` exactly, so every BM25/hybrid
+row's delta is directly comparable to it.
+
+| retriever | candidate_k | recall@1 | recall@5 | recall@10 | mrr | ndcg@5 | false_abstain | abstain_rate | secs |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| dense (baseline) | — | 0.544 | 0.836 | 0.880 | 0.659 | 0.698 | 0.003 | 0.417 | 59 |
+| bm25 | — | 0.632 | 0.877 | 0.921 | 0.734 | 0.764 | 0.000 | 0.042 | 0 |
+| hybrid (rrf) | 8 | 0.658 | 0.896 | 0.968 | 0.764 | 0.790 | 0.000 | 0.000 | 59 |
+| hybrid (rrf) | 32 | 0.670 | 0.893 | 0.953 | 0.770 | 0.795 | 0.000 | 0.000 | 57 |
+| hybrid (rrf) | 64 | 0.670 | 0.890 | 0.959 | 0.770 | 0.793 | 0.000 | 0.000 | 57 |
+
+**BM25 alone beats the Phase D dense baseline by a wide margin on this
+corpus** — `ndcg@5` +0.066 (0.698 → 0.764), `recall@1` +0.088 (0.544 →
+0.632) — essentially free (SQLite FTS5 over 839 chunks scores in well under
+a second, the "0" in the `secs` column). This corpus is technical
+documentation — flag names, function names, exact filenames — exactly the
+vocabulary lexical search is strong at and where a paraphrase-tolerant
+embedding sometimes blurs a specific term into its neighbourhood instead of
+matching it exactly. **RRF hybrid fusion beats both single-signal
+retrievers on every ranking metric**, `ndcg@5` reaching 0.795 at
+`candidate_k=32` (+0.097 over dense, +0.031 over BM25 alone) — the two
+signals catch different chunks often enough that combining them, even by
+rank alone, finds more of the gold spans than either does. Gains from
+widening `candidate_k` past 32 are flat (`ndcg@5` 0.795 → 0.793, within
+noise), mirroring session F1's reranking sweep's own plateau shape.
+
+**A second abstention-scale bug, the same shape as F1's, found by running
+the real measurement rather than assumed:** the first run of this sweep,
+with `Rag`'s dense-calibrated `min_score` (:data:`DEFAULT_MIN_SCORE`,
+`0.55`) left untouched, measured `false_abstain_rate = 1.000` for every
+hybrid row — literally every answerable question flagged as insufficient.
+Cause: RRF's fused scores sit around `0.01`–`0.05` (a handful of
+`1 / (60 + rank)` terms), and BM25's are on their own unbounded-but-usually-
+larger scale — neither is remotely close to a cosine floor measured for the
+*embedder*. `docs/conventions.md` "Abstention" and `pipeline.py`'s
+docstrings now say plainly that `min_score` is meaningful only for
+whichever retriever is actually wired into `self.retriever`, generalising
+the caveat F1 already established for reranker scores. The sweep script
+sets `rag.min_score = None` before measuring the BM25/hybrid rows, which is
+what the table above reports.
+
+**That fix surfaces the real, unresolved cost of switching retrievers: with
+no calibrated floor, `insufficient_context` stops catching genuinely
+unrelated questions.** `abstain_rate` (the share of unanswerable items
+correctly flagged) drops from the dense baseline's measured `0.417` to
+`0.042` for BM25 and `0.000` for hybrid — BM25 and RRF scores for an
+off-topic query are not reliably lower than for an on-topic one the way
+dense cosine is, so a `min_score` floor for these scales, if one exists at
+all, has not been measured. **This is the reason `Bm25Retriever` /
+`HybridRetriever` are not wired into `Rag.from_defaults()`'s default**,
+despite clearing the Acceptance bar on ranking metrics alone: unlike F1's
+reranker (a model-loading cost, unrelated to retrieval quality), this is a
+genuine, currently-unmitigated quality regression on the "say I don't know"
+half of the engine. Measuring a BM25/RRF-scale abstention floor — the same
+kind of study `insufficient_context`'s docstring already did for the
+default dense embedder — is a named follow-up, not silently dropped.
+
+**FTS5 is a capability check, not an assumption, and both paths are
+measured to rank the same way.** `SqliteDocumentStore` tries to create the
+`chunks_fts` virtual table at open time and records whether it worked as
+`fts5_available` — `True` on every machine this session ran on (Python's
+bundled SQLite ships FTS5 by default on both Windows and the `ubuntu-24.04`
+CI image), but `tests/test_bm25_retriever.py` and
+`tests/test_sqlite_docs.py` force the unavailable branch directly (there is
+no portable way to actually build a Python without FTS5 compiled in to test
+against) and confirm `Bm25Retriever`'s NumPy fallback — the same Okapi
+BM25 formula (`k1=1.2`, `b=0.75`, SQLite's own `bm25()` defaults) computed
+from scratch per query instead of from an index — ranks the toy corpus
+identically to the FTS5 path. **Zero new dependencies either way**: FTS5
+ships inside SQLite itself, and the fallback is stdlib `re` plus the
+already-core `numpy` — `uv.lock` is unchanged by this session.
+
+**Wire either in by hand** (both stay opt-in; `Rag()`'s and
+`from_defaults()`'s own default remains `DenseRetriever`):
+
+```python
+from nanorag.retrieval import Bm25Retriever, DenseRetriever, HybridRetriever
+
+rag = Rag.from_defaults(min_score=None)  # no measured floor for these scales yet
+dense = DenseRetriever(rag.embedder, rag.vectors, rag.docs, k=rag.retrieve_k)
+bm25 = Bm25Retriever(rag.docs, k=rag.retrieve_k)
+rag.retriever = bm25  # BM25 alone, or:
+rag.retriever = HybridRetriever(dense, bm25, candidate_k=32)  # the best-measured row above
+```
+
 ## Negative results and caveats
 
 - **Overlap at 256 tokens and above buys nothing measurable** (≤ 2 pp,

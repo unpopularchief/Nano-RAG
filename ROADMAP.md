@@ -12,7 +12,7 @@ contiguous release list.
 | **C — First answers (MVP)** | `v0.1.0` | Documents in, cited answer out — free key or fully offline. First public release. | **done — `v0.1.0`, Gate C passed** |
 | **D — Trust** | `v0.3.0` | Citations resolving to text spans, a CLI, quality as numbers in CI (≥ 200-item eval set). | **done — `v0.3.0`, Gate D passed** |
 | **E — Durability** | `v0.4.0` | Re-ingesting a changed corpus is correct and cheap. | **done — `v0.4.0`, Gate E passed** |
-| **F — Quality** | `v0.6.0` | Beat the Phase D baseline with evidence — reranking, BM25/hybrid, MMR. Negative results published. | F1 done — F2, F3 next |
+| **F — Quality** | `v0.6.0` | Beat the Phase D baseline with evidence — reranking, BM25/hybrid, MMR. Negative results published. | F1, F2 done — F3 next |
 | **G — Reach** | `v0.7.0` | PDF/HTML loaders, external stores (Qdrant, pgvector), hosted embeddings — without touching the core. | not started |
 | **H — Production** | `v1.0.0` | Structured logging, cost accounting, deployment guide, threat model, API freeze. | not started |
 
@@ -356,6 +356,55 @@ contiguous release list.
     a named follow-up, scoped out of F1 rather than silently deferred.
     `Rag()`'s own bare default stays `IdentityReranker` (zero
     dependencies) either way.
+
+- **F2** ✅ — `retrieval/`: `base.py` (the `Retriever` protocol —
+  `retrieve(query, k, filter) -> list[ScoredChunk]`, written now that
+  `DenseRetriever` has two siblings), `bm25.py` (`Bm25Retriever`: SQLite
+  FTS5 lexical search behind a capability check —
+  `SqliteDocumentStore.fts5_available`, set once at open time, with a
+  NumPy Okapi BM25 fallback recomputed per call when FTS5 is
+  unavailable), `hybrid.py` (`HybridRetriever`: Reciprocal Rank Fusion —
+  rank-only, never raw score — over any two or more retrievers). `Rag`
+  gained an overridable `retriever=` constructor parameter, defaulting to
+  `DenseRetriever` — byte-identical to before F2 — the same pattern
+  `reranker=` already established. `SqliteDocumentStore` gained a
+  `chunks_fts` virtual table kept in sync with `chunks` by triggers
+  (`PRAGMA recursive_triggers = ON`, needed for the trigger to fire on a
+  foreign-key-cascaded document delete too) and a `search_bm25()` method.
+  Zero new dependencies: FTS5 ships inside SQLite itself, and the
+  fallback is stdlib `re` plus the already-core `numpy`.
+  - **Measured against the real committed corpus/thresholds**
+    (`benchmarks/hybrid_sweep.py`, `docs/evaluation.md` "Hybrid
+    retrieval"): BM25 alone beats the dense baseline on this
+    technical-documentation corpus — `ndcg@5` 0.698 → 0.764, `recall@1`
+    0.544 → 0.632, essentially free (SQLite FTS5 over 839 chunks scores in
+    under a second) — and RRF hybrid fusion beats both single-signal
+    retrievers again, `ndcg@5` → 0.795 at `candidate_k=32`, with gains
+    flat past that (mirroring F1's own plateau shape).
+  - **A second abstention-scale bug, the same shape as F1's, found by the
+    real measurement**: with the dense-calibrated `min_score` left on, the
+    first sweep run measured `false_abstain_rate = 1.000` for every hybrid
+    row — RRF's fused scores (~0.01–0.05) and BM25's are nowhere near a
+    cosine floor measured for the embedder. Not a code bug to fix (the
+    floor genuinely does not apply to a different score scale, exactly
+    F1's reranker finding generalised) — `pipeline.py`'s abstention
+    docstrings and `docs/conventions.md` "Abstention" now say plainly that
+    `min_score`/`min_gap` are meaningful only for whichever retriever is
+    actually wired in.
+  - **Disabling the floor for the BM25/hybrid rows surfaced a real,
+    unresolved cost, not just a scale mismatch to shrug off**:
+    `abstain_rate` on genuinely unrelated questions drops from the dense
+    baseline's measured `0.417` to `0.042` (BM25) to `0.000` (hybrid) — an
+    off-topic query's BM25/RRF score is not reliably lower than an
+    on-topic one's the way dense cosine is, so no calibrated floor for
+    these scales has been measured yet. **This, not a loading cost, is
+    why `Bm25Retriever`/`HybridRetriever` are not wired into
+    `Rag.from_defaults()`'s default** despite clearing the Acceptance bar
+    on ranking metrics: it would be trading a measured abstention
+    capability away for a ranking win, silently, which plan.md §9 Phase F
+    Acceptance's "every delta, including negative ones, documented" rules
+    out doing quietly. Measuring a BM25/RRF-scale abstention floor is a
+    named follow-up, not dropped.
 
 ## Out of scope through 1.0
 

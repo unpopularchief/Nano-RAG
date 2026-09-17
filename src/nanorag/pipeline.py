@@ -65,6 +65,7 @@ from nanorag.observability.timing import Timer
 from nanorag.prompting.templates import INSUFFICIENT_CONTEXT_TEXT, PromptBuilder
 from nanorag.rerank.base import Reranker
 from nanorag.rerank.identity import IdentityReranker
+from nanorag.retrieval.base import Retriever
 from nanorag.retrieval.dense import DenseRetriever
 from nanorag.store.filters import Filter
 from nanorag.store.numpy_store import NumpyVectorStore
@@ -394,6 +395,17 @@ class Rag:
         *budget_margin* exists (plan.md §18 F4).
     k
         Chunks kept per query, after reranking.
+    retriever
+        What ``retrieve_k`` candidates come from. Defaults to a
+        :class:`~nanorag.retrieval.dense.DenseRetriever` over the wired
+        embedder/vectors/docs — byte-identical to before Phase F session
+        F2. Pass a :class:`~nanorag.retrieval.bm25.Bm25Retriever` or
+        :class:`~nanorag.retrieval.hybrid.HybridRetriever` to change what
+        is retrieved (plan.md §9 Phase F session F2, measured against the
+        Phase D baseline in ``docs/evaluation.md``). ``min_score`` stays on
+        *this* retriever's score scale — calibrated only for dense cosine
+        (see :data:`DEFAULT_MIN_SCORE`) — so leave it ``None`` for a
+        non-dense retriever unless you have measured your own floor.
     reranker
         Re-scores the ``retrieve_k`` candidates down to *k* (plan.md §9
         Phase F). Defaults to :class:`~nanorag.rerank.identity.
@@ -440,6 +452,7 @@ class Rag:
         prompt_builder: PromptBuilder | None = None,
         counter: TokenCounter | None = None,
         k: int = DEFAULT_K,
+        retriever: Retriever | None = None,
         reranker: Reranker | None = None,
         retrieve_k: int | None = None,
         budget_margin: float = DEFAULT_BUDGET_MARGIN,
@@ -474,7 +487,11 @@ class Rag:
         )
         self.k = k
         self.retrieve_k = retrieve_k if retrieve_k is not None else k
-        self.retriever = DenseRetriever(embedder, self.vectors, docs, k=self.retrieve_k)
+        self.retriever: Retriever = (
+            retriever
+            if retriever is not None
+            else DenseRetriever(embedder, self.vectors, docs, k=self.retrieve_k)
+        )
         self.reranker: Reranker = (
             reranker if reranker is not None else IdentityReranker()
         )
@@ -816,21 +833,25 @@ class Rag:
 
         Every step is a public function a caller could run by hand; this
         method only sequences them and records timings. Abstention
-        (``insufficient_context``) is judged on the retriever's own dense
-        hits, never the reranked ones: its thresholds live on the
-        embedder's score scale (plan.md §18 F10, ``docs/conventions.md``
-        "Abstention"), and a reranker's score generally is not — Jina's and
-        the local cross-encoder's are both on their own, uncalibrated
-        scales. Reranking still decides what goes *in* the prompt; it just
-        never gets to decide whether there was enough to prompt with.
+        (``insufficient_context``) is judged on ``self.retriever``'s own
+        hits, never the reranked ones — reranking still decides what goes
+        *in* the prompt, it just never gets to decide whether there was
+        enough to prompt with. ``min_score`` is on *that retriever's* score
+        scale: calibrated only for the default dense cosine retriever
+        (plan.md §18 F10, ``docs/conventions.md`` "Abstention"); a
+        reranker's score is never on that scale either (Jina's and the
+        local cross-encoder's are both their own, uncalibrated scales), and
+        neither is a non-dense ``self.retriever`` (BM25, hybrid — plan.md
+        §9 Phase F session F2) — leave ``min_score`` at ``None`` unless
+        you've measured a floor for whatever is actually in play.
         """
         timer = Timer()
         final_k = self._resolve_k(k)
         with timer.stage("retrieve"):
-            dense_hits = self.retriever.retrieve(
+            primary_hits = self.retriever.retrieve(
                 question, k=max(self.retrieve_k, final_k), filter=filter
             )
-            hits = rerank_hits(self.reranker, question, dense_hits, final_k)
+            hits = rerank_hits(self.reranker, question, primary_hits, final_k)
 
         with timer.stage("context"):
             overhead = self.counter.count(
@@ -844,7 +865,7 @@ class Rag:
             )
             context = ContextBuilder(budget, counter=self.counter).build(hits)
             thin = insufficient_context(
-                dense_hits[:final_k],
+                primary_hits[:final_k],
                 min_results=self.min_results,
                 min_gap=self.min_gap,
                 min_score=self.min_score,

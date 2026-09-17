@@ -8,7 +8,7 @@ afternoon, run it against your own documents, and operate it for free.
 > both closed: citations resolve to text spans, there's a command line,
 > quality is a number enforced in CI, and re-ingesting a changed corpus is
 > correct and cheap. Phase F (quality — reranking, hybrid retrieval, MMR)
-> is underway, session F1 done.** The package installs, lints, type-checks,
+> is underway, sessions F1 and F2 done.** The package installs, lints, type-checks,
 > tests and builds a wheel on Linux and Windows. It loads real files
 > (`loaders/`), cleans and chunks them (`cleaning/`, `chunking/`), embeds
 > them locally (`embeddings/` — `fastembed`/ONNX, no torch, cached and
@@ -53,7 +53,20 @@ afternoon, run it against your own documents, and operate it for free.
 > beats the Phase D baseline by a wide margin (`ndcg@5` 0.698 → 0.827,
 > `recall@1` 0.544 → 0.721) — see [`docs/evaluation.md`](docs/evaluation.md)
 > "Reranking" for the numbers, why it is not (yet) `from_defaults()`'s
-> default, and the one-liner to opt in today. See [`plan.md`](plan.md) §9
+> default, and the one-liner to opt in today. **Session F2 added hybrid
+> retrieval**: a `Retriever` protocol, `Bm25Retriever` (SQLite FTS5 lexical
+> search — a capability check, not an assumption, with a NumPy fallback for
+> a build without FTS5 — zero new dependencies either way) and
+> `HybridRetriever` (Reciprocal Rank Fusion over any two or more
+> retrievers). `Rag.retriever` is now overridable the same way
+> `Rag.reranker` already was. **Measured**: BM25 alone beats the dense
+> baseline on this technical-documentation corpus (`ndcg@5` 0.698 → 0.764),
+> and RRF hybrid fusion beats both (`ndcg@5` → 0.795) — but neither is
+> `from_defaults()`'s default, because no calibrated abstention floor
+> exists yet for their score scales and `abstain_rate` on genuinely
+> unrelated questions measurably regresses without one. See
+> [`docs/evaluation.md`](docs/evaluation.md) "Hybrid retrieval" for the full
+> numbers and the one-liner to opt in today. See [`plan.md`](plan.md) §9
 > for the phased roadmap and [`ROADMAP.md`](ROADMAP.md) for the condensed
 > version.
 

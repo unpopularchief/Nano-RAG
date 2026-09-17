@@ -182,9 +182,9 @@ class ScoredChunk:
     score
         The score under ``source``'s ranking (cosine, BM25, rerank). Higher is
         more relevant; the scale is not comparable across sources.
-    source
-        Where the score came from: ``"dense"``, ``"bm25"``, ``"rerank:jina"``,
-        ``"rerank:local"``, … — provenance for debugging a ranking.
+        Where the score came from: ``"dense"``, ``"bm25"``, ``"hybrid:rrf"``,
+        ``"rerank:jina"``, ``"rerank:local"``, … — provenance for debugging
+        a ranking.
 
     """
 

@@ -8,13 +8,26 @@ math), ``embeddings`` (the vectors, the durable source of truth a
 replaces its chunks in one transaction; a re-ingest's stale chunks — and,
 via ``ON DELETE CASCADE``, their embeddings — are removed rather than left
 behind. A failure partway through either write leaves no row changed.
+
+A fifth, optional table, ``chunks_fts`` (plan.md §9 Phase F session F2:
+"BM25 over SQLite FTS5 ... capability check"), mirrors ``chunks`` for
+lexical search. FTS5 ships in SQLite itself — no new dependency — but is an
+optional compile-time feature some minimal SQLite builds omit, so it is
+never assumed: :meth:`_init_fts5` tries to create it and records whether
+that worked as :attr:`fts5_available`. When it did, ``AFTER INSERT`` /
+``AFTER DELETE`` triggers on ``chunks`` keep it in sync automatically —
+including through the ``ON DELETE CASCADE`` a document delete triggers,
+which is why ``PRAGMA recursive_triggers`` is turned on below (SQLite does
+not fire a child table's own triggers for a foreign-key-cascaded delete
+otherwise) — so no code in :meth:`upsert_document` / :meth:`delete_document`
+has to know ``chunks_fts`` exists at all.
 """
 
 from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Iterator, Sequence
+from collections.abc import Collection, Iterator, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -60,6 +73,18 @@ CREATE TABLE IF NOT EXISTS meta (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+"""
+
+_FTS_SCHEMA = """
+CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(chunk_id UNINDEXED, text);
+
+CREATE TRIGGER IF NOT EXISTS chunks_fts_ai AFTER INSERT ON chunks BEGIN
+    INSERT INTO chunks_fts(chunk_id, text) VALUES (new.chunk_id, new.text);
+END;
+
+CREATE TRIGGER IF NOT EXISTS chunks_fts_ad AFTER DELETE ON chunks BEGIN
+    DELETE FROM chunks_fts WHERE chunk_id = old.chunk_id;
+END;
 """
 
 _MODEL_ID_KEY = "embedding_model_id"
@@ -126,8 +151,44 @@ class SqliteDocumentStore:
         self._path = Path(path)
         self._conn = sqlite3.connect(str(self._path))
         self._conn.execute("PRAGMA foreign_keys = ON")
+        self._conn.execute("PRAGMA recursive_triggers = ON")
         self._conn.executescript(_SCHEMA)
         self._conn.commit()
+        self._fts5_available = self._init_fts5()
+
+    def _init_fts5(self) -> bool:
+        """Create (or detect) the FTS5 index; return whether FTS5 is available.
+
+        A capability check, not an assumption (plan.md §9 Phase F session
+        F2): some SQLite builds omit the optional FTS5 extension, caught
+        here as ``sqlite3.OperationalError`` rather than propagated.
+        ``chunks_fts`` and its sync triggers are ``IF NOT EXISTS``, so
+        reopening an existing store is a no-op; the backfill below then
+        covers the one case the triggers alone cannot — ``chunks`` rows
+        written before FTS5 became available (or before this table
+        existed) on this machine.
+        """
+        try:
+            self._conn.executescript(_FTS_SCHEMA)
+        except sqlite3.OperationalError:
+            return False
+        with self._conn:
+            self._conn.execute(
+                "INSERT INTO chunks_fts(chunk_id, text) "
+                "SELECT chunk_id, text FROM chunks "
+                "WHERE chunk_id NOT IN (SELECT chunk_id FROM chunks_fts)"
+            )
+        return True
+
+    @property
+    def fts5_available(self) -> bool:
+        """Whether this store's SQLite build has the FTS5 extension compiled in.
+
+        ``False`` means :meth:`search_bm25` cannot be used — callers (see
+        ``nanorag.retrieval.bm25.Bm25Retriever``) fall back to a NumPy BM25
+        computed from :meth:`iter_chunks` instead.
+        """
+        return self._fts5_available
 
     def close(self) -> None:
         """Close the underlying SQLite connection."""
@@ -328,6 +389,78 @@ class SqliteDocumentStore:
             params,
         )
         return {row[0] for row in cursor}
+
+    def search_bm25(
+        self,
+        match_query: str,
+        k: int,
+        *,
+        allowed_ids: Collection[str] | None = None,
+    ) -> list[tuple[str, float]]:
+        """Return up to *k* ``(chunk_id, score)`` pairs, highest BM25 score first.
+
+        Parameters
+        ----------
+        match_query
+            An FTS5 ``MATCH`` expression, already built — this method does
+            no tokenizing of its own (see
+            ``nanorag.retrieval.bm25._fts5_match_query``), mirroring how
+            :meth:`NumpyVectorStore.search
+            <nanorag.store.numpy_store.NumpyVectorStore.search>` takes an
+            already-embedded query vector rather than raw text.
+        k
+            Maximum number of results.
+        allowed_ids
+            When given, restricts the search to this set of chunk ids (a
+            metadata pre-filter's result), applied **before** the top-*k*
+            cut, never after (plan.md §15 #7). Batched in groups of
+            :data:`_IN_BATCH` to stay under SQLite's bound-parameter limit;
+            merging the batches and re-sorting is exact, not approximate —
+            FTS5's ``bm25()`` computes its IDF statistics over the whole
+            indexed corpus, not the filtered rows in one query's result set,
+            so a chunk's score does not depend on which batch it landed in.
+
+        Raises
+        ------
+        StoreError
+            :attr:`fts5_available` is ``False``, or *k* < 1.
+
+        """
+        if not self._fts5_available:
+            raise StoreError("FTS5 is not available in this SQLite build")
+        if k < 1:
+            raise StoreError(f"k must be >= 1, got {k}")
+
+        if allowed_ids is None:
+            rows = self._conn.execute(
+                "SELECT chunk_id, bm25(chunks_fts) FROM chunks_fts "
+                "WHERE chunks_fts MATCH ? ORDER BY bm25(chunks_fts) LIMIT ?",
+                (match_query, k),
+            ).fetchall()
+        else:
+            allowed = list(allowed_ids)
+            rows = []
+            for start in range(0, len(allowed), _IN_BATCH):
+                batch = allowed[start : start + _IN_BATCH]
+                placeholders = ", ".join("?" for _ in batch)
+                rows.extend(
+                    self._conn.execute(
+                        "SELECT chunk_id, bm25(chunks_fts) FROM chunks_fts "
+                        f"WHERE chunks_fts MATCH ? AND chunk_id IN ({placeholders}) "
+                        "ORDER BY bm25(chunks_fts) LIMIT ?",
+                        (match_query, *batch, k),
+                    ).fetchall()
+                )
+
+        # bm25() is a cost (lower is better); negate to the higher-is-better
+        # convention every other score in this codebase uses, then re-sort —
+        # each batch above is only individually ordered — with the same
+        # score-desc/id-asc tie-break every other store uses.
+        scored = sorted(
+            ((chunk_id, -raw) for chunk_id, raw in rows),
+            key=lambda pair: (-pair[1], pair[0]),
+        )
+        return scored[:k]
 
     # -- embeddings ----------------------------------------------------------
 

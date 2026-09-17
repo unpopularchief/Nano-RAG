@@ -295,3 +295,108 @@ def test_reopen_rebuilds_vector_store_and_reproduces_search(tmp_path):
     after = rebuilt_index.search(query, k=3)
 
     assert before == after
+
+
+# --- FTS5 / BM25 (plan.md §9 Phase F session F2) ----------------------------
+
+
+def _requires_fts5(store):
+    if not store.fts5_available:
+        pytest.skip("FTS5 not available in this SQLite build")
+
+
+def test_search_bm25_finds_the_matching_chunk(tmp_path):
+    store = SqliteDocumentStore(tmp_path / "db.sqlite3")
+    _requires_fts5(store)
+    doc = _doc("a.txt", "the quick brown fox jumps over the lazy dog")
+    chunks = _chunks(doc, "the quick brown fox jumps over the lazy dog")
+    store.upsert_document(doc, chunks)
+
+    hits = store.search_bm25('"fox" OR "dog"', 5)
+    assert hits and hits[0][0] == chunks[0].chunk_id
+    assert hits[0][1] > 0
+
+
+def test_search_bm25_rejects_k_less_than_one(tmp_path):
+    store = SqliteDocumentStore(tmp_path / "db.sqlite3")
+    _requires_fts5(store)
+    with pytest.raises(StoreError):
+        store.search_bm25('"x"', 0)
+
+
+def test_search_bm25_raises_store_error_when_fts5_unavailable(tmp_path):
+    store = SqliteDocumentStore(tmp_path / "db.sqlite3")
+    store._fts5_available = False  # noqa: SLF001 - simulate a build without FTS5
+    with pytest.raises(StoreError):
+        store.search_bm25('"x"', 5)
+
+
+def test_search_bm25_allowed_ids_is_a_pre_filter_not_a_post_filter(tmp_path):
+    store = SqliteDocumentStore(tmp_path / "db.sqlite3")
+    _requires_fts5(store)
+    doc = _doc("a.txt", "alpha match one. alpha match two. alpha match three.")
+    chunks = _chunks(doc, "alpha match one.", "alpha match two.", "alpha match three.")
+    store.upsert_document(doc, chunks)
+    allowed = {chunks[2].chunk_id}
+
+    hits = store.search_bm25('"alpha"', 1, allowed_ids=allowed)
+    assert [cid for cid, _ in hits] == [chunks[2].chunk_id]
+
+
+def test_search_bm25_allowed_ids_batches_across_the_in_batch_limit(tmp_path):
+    import nanorag.store.sqlite_docs as sqlite_docs_module
+
+    store = SqliteDocumentStore(tmp_path / "db.sqlite3")
+    _requires_fts5(store)
+    n = sqlite_docs_module._IN_BATCH + 5
+    doc = _doc("a.txt", " ".join(f"word{i}" for i in range(n)))
+    chunks = _chunks(doc, *(f"word{i}" for i in range(n)))
+    store.upsert_document(doc, chunks)
+    allowed = {c.chunk_id for c in chunks}
+
+    hits = store.search_bm25(
+        " OR ".join(f'"word{i}"' for i in range(n)), n, allowed_ids=allowed
+    )
+    assert {cid for cid, _ in hits} == allowed
+
+
+def test_chunks_fts_stays_in_sync_across_upsert_and_delete(tmp_path):
+    store = SqliteDocumentStore(tmp_path / "db.sqlite3")
+    _requires_fts5(store)
+    doc = _doc("a.txt", "one two three")
+    chunks = _chunks(doc, "one", "two", "three")
+    store.upsert_document(doc, chunks)
+    assert store.search_bm25('"two"', 5)[0][0] == chunks[1].chunk_id
+
+    # Re-upserting with fewer chunks must drop the stale ones from chunks_fts.
+    edited = _doc("a.txt", "one three")
+    store.upsert_document(edited, _chunks(edited, "one", "three"))
+    assert store.search_bm25('"two"', 5) == []
+
+    # A cascading document delete must also clear chunks_fts (this is what
+    # `PRAGMA recursive_triggers = ON` is for: an `AFTER DELETE ON chunks`
+    # trigger does not fire for an FK-cascaded delete without it).
+    store.delete_document(edited.doc_id)
+    assert store.search_bm25('"one"', 5) == []
+
+
+def test_fts5_backfills_chunks_written_before_it_was_available(tmp_path):
+    db_path = tmp_path / "db.sqlite3"
+    store = SqliteDocumentStore(db_path)
+    _requires_fts5(store)
+    doc = _doc("a.txt", "backfilled text")
+    chunks = _chunks(doc, "backfilled text")
+    store.upsert_document(doc, chunks)
+
+    # Simulate this row having been written while chunks_fts didn't exist
+    # (FTS5 unavailable, or the table simply predates this feature) by
+    # deleting straight from the FTS5 table without going through `chunks`.
+    store._conn.execute(  # noqa: SLF001
+        "DELETE FROM chunks_fts WHERE chunk_id = ?", (chunks[0].chunk_id,)
+    )
+    store._conn.commit()  # noqa: SLF001
+    store.close()
+
+    reopened = SqliteDocumentStore(db_path)
+    assert reopened.search_bm25('"backfilled"', 5)[0][0] == chunks[0].chunk_id
+    reopened.close()
