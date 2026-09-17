@@ -82,9 +82,9 @@ afternoon, run it against your own documents, and operate it for free.
 > unit-tested but not measured live (no generator was available this
 > session). See [`docs/evaluation.md`](docs/evaluation.md) "MMR,
 > parent-document expansion, query transforms" for the full numbers and
-> why none is a default. See [`plan.md`](plan.md) §9
-> for the phased roadmap and [`ROADMAP.md`](ROADMAP.md) for the condensed
-> version.
+> why none is a default. See [`ROADMAP.md`](ROADMAP.md) for the phased
+> roadmap (condensed from `plan.md`, the project's internal design doc —
+> not part of this repo).
 
 ## What it will be
 

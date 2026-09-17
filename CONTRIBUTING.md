@@ -1,8 +1,10 @@
 # Contributing
 
-Nano RAG is built **one phase at a time** — see [`plan.md`](plan.md) §9. Each
-phase ends at a review gate where work stops. Nothing from a later phase is
-scaffolded ahead of time.
+Nano RAG is built **one phase at a time**, per `plan.md` §9 (the project's
+internal design doc — not part of this repo). Each phase ends at a review
+gate where work stops. Nothing from a later phase is scaffolded ahead of
+time. See [`ROADMAP.md`](ROADMAP.md) for the condensed, public version of
+the phase plan.
 
 ## The dependency line
 

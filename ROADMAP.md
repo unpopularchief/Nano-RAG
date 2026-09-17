@@ -1,6 +1,7 @@
 # Roadmap
 
-Condensed from [`plan.md`](plan.md) §9. Eight phases, twenty-three sessions.
+Condensed from `plan.md` §9 (the project's internal design doc — not part
+of this repo). Eight phases, twenty-three sessions.
 Each session ends at a checkpoint; **each phase ends at a review gate where
 work stops** before the next phase begins. Version tags are targets, not a
 contiguous release list.

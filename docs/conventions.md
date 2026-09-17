@@ -1,7 +1,8 @@
 # Conventions
 
-The house style every module follows. See [`plan.md`](../plan.md) for the
-reasoning. This reuses the sibling project (`ML From Scratch`) toolchain
+The house style every module follows, per `plan.md` (the project's internal
+design doc — not part of this repo). This reuses the sibling project
+(`ML From Scratch`) toolchain
 wholesale, with a higher Python floor (`>=3.11`) and a 3-version CI matrix.
 
 ## Layout
