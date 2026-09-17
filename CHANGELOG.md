@@ -7,6 +7,61 @@ breaking changes bump the minor).
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-09-18
+
+Phase F: reranking, hybrid retrieval, MMR, parent-document expansion and
+query transforms all measured against the Phase D baseline, each with a
+committed number, positive or negative.
+
+### Gate F — decisions locked against plan.md §9's Phase F block
+
+- **The Tests list is covered literally**, checked by test name rather than
+  inferred from session summaries: MockTransport provider tests
+  (`test_rerank_jina.py`), reranker failure degrading to the retriever's
+  own order with a warning (`test_reranker_failure_degrades_to_retriever_
+  order_with_a_warning`), tie-stability (`test_ties_preserve_the_response_
+  order_stable_sort`, `test_ties_are_broken_by_chunk_id`), BM25 vs. a
+  hand-computed reference on both the FTS5 and NumPy-fallback paths
+  (`test_numpy_fallback_matches_the_hand_computed_reference`,
+  `test_fts5_path_ranks_consistently_with_the_hand_computed_reference`),
+  RRF arithmetic (`test_rrf_score_is_the_hand_computed_sum_of_reciprocal_
+  ranks`), the MMR diversity bound (`test_mmr_picks_the_diverse_candidate_
+  over_the_near_duplicate`, `test_mmr_scores_match_the_hand_computed_
+  arithmetic`), and the FTS5-unavailable path
+  (`test_fts5_unavailable_uses_the_numpy_fallback_and_still_finds_the_
+  match`, `test_search_bm25_raises_store_error_when_fts5_unavailable`).
+- **"Each technique enabled by default only if it improves the Phase D
+  metrics" holds, with a documented reason beyond raw metrics for every
+  technique** — not just the ones that lost: `LocalCrossEncoderReranker`
+  and `Bm25Retriever`/`HybridRetriever` both clear the ranking bar
+  decisively (`ndcg@5` +0.129 and +0.097 respectively) but stay opt-in —
+  the reranker because it eagerly loads an ONNX model at construction and
+  `from_defaults()` builds the one `Rag` behind `nanorag ingest`, which
+  must stay network-free; hybrid/BM25 because no calibrated abstention
+  floor exists yet for the RRF/BM25 score scale, and disabling the
+  dense-calibrated floor measurably regresses `abstain_rate` on unrelated
+  questions. MMR does not clear the bar at all (every `lambda_mult` lands
+  within noise of the baseline). Parent-document expansion's modest win
+  doesn't yet account for its own context-token-budget cost (a
+  retrieval-only sweep cannot see it). None of the five techniques changed
+  `from_defaults()`'s behaviour — `Rag` still answers exactly as it did at
+  Gate E until a caller opts one in.
+- **"Every delta, including negative ones, documented" — confirmed against
+  `docs/evaluation.md` and the README status paragraph**, both already
+  carrying the real sweep numbers as each session landed, not summarised
+  after the fact at gate time.
+- **The one open Acceptance line — "the local cross-encoder is preferred
+  over the Jina API if it matches within noise" — cannot be verified**:
+  no `JINA_API_KEY` was available this session either, the same situation
+  every F1–F3 session was in. Scoped out as a named follow-up rather than
+  a Gate F blocker, mirroring Gate D's Groq/Gemini API-leg precedent — the
+  local cross-encoder's `ndcg@5` win over the Phase D baseline already
+  stands on its own measured merit, independent of a head-to-head against
+  Jina.
+- Version `0.6.0`; classifier stays `4 - Beta` — every Phase F technique is
+  opt-in, so there is no new *default* public surface since Gate E, even
+  though five new opt-in components shipped.
+
 ### Added
 
 - **Phase F, session F3 — MMR, parent-document expansion, query

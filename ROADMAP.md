@@ -12,7 +12,7 @@ contiguous release list.
 | **C — First answers (MVP)** | `v0.1.0` | Documents in, cited answer out — free key or fully offline. First public release. | **done — `v0.1.0`, Gate C passed** |
 | **D — Trust** | `v0.3.0` | Citations resolving to text spans, a CLI, quality as numbers in CI (≥ 200-item eval set). | **done — `v0.3.0`, Gate D passed** |
 | **E — Durability** | `v0.4.0` | Re-ingesting a changed corpus is correct and cheap. | **done — `v0.4.0`, Gate E passed** |
-| **F — Quality** | `v0.6.0` | Beat the Phase D baseline with evidence — reranking, BM25/hybrid, MMR. Negative results published. | F1–F3 done — Gate F next |
+| **F — Quality** | `v0.6.0` | Beat the Phase D baseline with evidence — reranking, BM25/hybrid, MMR. Negative results published. | **done — `v0.6.0`, Gate F passed** |
 | **G — Reach** | `v0.7.0` | PDF/HTML loaders, external stores (Qdrant, pgvector), hosted embeddings — without touching the core. | not started |
 | **H — Production** | `v1.0.0` | Structured logging, cost accounting, deployment guide, threat model, API freeze. | not started |
 
@@ -444,6 +444,30 @@ contiguous release list.
     unit-tested (fakes/`FakeGenerator`) but not measured live** — no
     generator was available this session, matching F1's `JinaReranker`
     situation; a live sweep is a named follow-up.
+
+- **🚦 Gate F** ✅ — `v0.6.0`. Reviewed against plan.md §9's Phase F block:
+  the Tests list (MockTransport provider tests, reranker-failure
+  degradation, tie-stability, BM25-vs-reference, RRF arithmetic, MMR
+  diversity bound, FTS5-unavailable path) is covered literally, one test
+  per item, checked by name rather than inferred from the session
+  summaries. Acceptance — "each technique enabled by default only if it
+  improves the Phase D metrics" — holds for a reason beyond raw metrics on
+  every technique, not just the ones that lost: the local cross-encoder
+  and BM25/hybrid both clear the ranking bar decisively but stay opt-in
+  for a real cost each (eager ONNX load cost at every `nanorag ingest`;
+  no calibrated abstention floor for the RRF/BM25 score scale), MMR
+  doesn't clear the bar at all, and parent expansion's modest win doesn't
+  yet account for its own context-budget cost. "Every delta, including
+  negative ones, documented" — confirmed against `docs/evaluation.md` and
+  the README status paragraph, both already carrying real numbers, not
+  summarised after the fact. The one open Acceptance line — "the local
+  cross-encoder is preferred over the Jina API if it matches within
+  noise" — cannot be verified without a live `JINA_API_KEY`, unavailable
+  again this session; scoped out as a named follow-up, not a blocker,
+  mirroring Gate D's Groq/Gemini API-leg precedent: the local
+  cross-encoder's win already stands on its own measured merit against
+  the Phase D baseline, independent of how it compares to Jina. See
+  CHANGELOG `[0.6.0]` for the full list.
 
 ## Out of scope through 1.0
 

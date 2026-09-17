@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "nanorag"
-version = "0.4.0"
+version = "0.6.0"
 description = "A small, readable, production-capable retrieval-augmented generation engine you can understand in an afternoon and run for free."
 readme = "README.md"
 license = "MIT"
