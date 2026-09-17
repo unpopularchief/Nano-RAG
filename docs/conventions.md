@@ -169,6 +169,53 @@ itself is a plain, overridable attribute since session F2 (mirroring
   confirmed by the F2 sweep, which measured `false_abstain_rate = 1.000`
   for every hybrid row before disabling `min_score` for them.
 
+## MMR, parent-document expansion, query transforms (Phase F, session F3)
+
+- Three composable wrappers over any `Retriever`, all opt-in, none wired
+  into `from_defaults()`: `MmrRetriever` (diversify by Maximal Marginal
+  Relevance — relevance from the wrapped retriever's own score,
+  min-max-normalised; diversity from the chunks' own embeddings, fetched
+  by id via `NumpyVectorStore.get_vectors`), `ParentExpandingRetriever`
+  (widen each hit to its neighbouring chunks, re-sliced from the owning
+  `Document.text` — never a concatenation of the narrow chunks' own text,
+  which would double-count chunker overlap), and `MultiQueryRetriever`
+  (retrieve for several phrasings of one question via a `QueryTransform`,
+  fused by the same `retrieval.hybrid.rrf_fuse` `HybridRetriever` uses —
+  factored out as one shared function specifically so the two RRF users
+  cannot drift apart, plan.md §5 rule 1).
+- **Composition order is a real constraint, not just a suggestion, for the
+  two that change chunk identity or content.** `MmrRetriever` looks up
+  vectors by a candidate's *current* chunk id, so it must sit *inside*
+  (closer to the base retriever than) `ParentExpandingRetriever`, whose
+  synthetic expanded chunks have a different id and no vector-store entry
+  of their own. Both modules' docstrings state this explicitly, in each
+  other's terms, so the constraint is visible from whichever one a reader
+  opens first.
+- **`QueryTransform` is the one deliberate exception to "the only network
+  call in the whole engine is the single generation request per query"**
+  (plan.md §4): `LLMQueryTransform` needs a generator call *before*
+  retrieval starts. `IdentityQueryTransform` (no expansion, a true
+  pass-through) is `MultiQueryRetriever`'s default for exactly that
+  reason — the extra call only ever happens when a caller explicitly asks
+  for it.
+- **A failing `QueryTransform` degrades to the original query alone**
+  (`QueryTransformError`, logged at `WARNING`) — the same "an optional
+  stage never fails the query" contract `rerank_hits` and `Bm25Retriever`'s
+  FTS5 fallback already uphold.
+- **Enabled by default only if it beats the Phase D baseline** (plan.md §9
+  Phase F Acceptance) — measured with `benchmarks/f3_sweep.py`. **MMR is
+  this phase's first genuine negative result**: every `lambda_mult` tested
+  lands within noise of the dense baseline on `nanorag-docs`, because the
+  corpus rarely puts near-duplicate chunks in one query's top candidates
+  for MMR to trade away in the first place. Parent-document expansion is a
+  real but modest win (`ndcg@5` +0.025 to +0.037) that measures "does the
+  shown span cover the gold quote" more than "did retrieval rank better" —
+  not defaulted on for two named, documented costs (context-budget
+  pressure from wider chunks; overlapping-hit redundancy `ContextBuilder`'s
+  exact-text dedup does not catch), not a ranking-quality objection.
+  `docs/evaluation.md` "MMR, parent-document expansion, query transforms"
+  has the full numbers and the mechanism explanation.
+
 ## Public types
 
 `Answer`, `Citation`, `Usage` and `Timings` are frozen since `v0.1.0`

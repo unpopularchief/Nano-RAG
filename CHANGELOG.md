@@ -9,6 +9,24 @@ breaking changes bump the minor).
 
 ### Added
 
+- **Phase F, session F3 — MMR, parent-document expansion, query
+  transforms.** Three composable `Retriever` wrappers, all opt-in: new
+  `retrieval.mmr.MmrRetriever` (Maximal Marginal Relevance — diversify by
+  the wrapped candidates' own embeddings, fetched via new
+  `NumpyVectorStore.get_vectors()`); new `retrieval.parent.
+  ParentExpandingRetriever` (widen each hit to its neighbouring chunks,
+  re-sliced from the owning `Document.text`); new
+  `retrieval.query_transform.MultiQueryRetriever` (retrieve for several
+  phrasings of one question, fused by the RRF math factored out of
+  `HybridRetriever` as `retrieval.hybrid.rrf_fuse`), with a
+  `QueryTransform` protocol, `IdentityQueryTransform` (the default —
+  no-op) and `LLMQueryTransform` (asks a generator for alternative
+  phrasings — the one deliberate exception to "one network call per
+  query"). New `QueryTransformError`.
+- `benchmarks/f3_sweep.py`, measuring MMR and parent-document expansion
+  against the same committed corpus/thresholds every other Phase D/F
+  sweep uses (see `docs/evaluation.md` "MMR, parent-document expansion,
+  query transforms" for the numbers — including MMR's negative result).
 - **Phase F, session F2 — hybrid retrieval.** New `Retriever` protocol
   (`retrieval/base.py`, `retrieve(query, k, filter) -> list[ScoredChunk]`,
   written now that `DenseRetriever` has two siblings); `Bm25Retriever`

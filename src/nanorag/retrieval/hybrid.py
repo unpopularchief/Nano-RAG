@@ -5,13 +5,22 @@ very different, incomparable signals (semantic similarity vs. exact term
 overlap) on incomparable score scales, so fusing on raw score would let
 whichever retriever's numbers happen to be larger dominate. RRF sidesteps
 the scale problem entirely by only looking at *rank*, never score: a
-chunk's fused score is ``sum(1 / (rrf_k + rank_r(chunk)) for r in
-retrievers)``, where ``rank_r(chunk)`` is its 1-based position in retriever
-*r*'s own result list — a chunk absent from *r*'s results contributes
-nothing from *r*, not a penalty.
+chunk's fused score is ``sum(1 / (rrf_k + rank_r(chunk)) for r in lists)``,
+where ``rank_r(chunk)`` is its 1-based position in one ranked list — a
+chunk absent from a list contributes nothing from it, not a penalty.
+
+:func:`rrf_fuse` is the fusion arithmetic itself, factored out as a public
+function (plan.md §5 rule 1's pattern — a module-level function anything
+can call, not logic hidden inside one class) because session F3's
+``retrieval.query_transform.MultiQueryRetriever`` needs the identical
+fusion — RRF across one retriever's results for *several query phrasings*
+rather than across several retrievers' results for *one* query — and
+duplicating the arithmetic would risk the two drifting apart.
 """
 
 from __future__ import annotations
+
+from collections.abc import Sequence
 
 from nanorag.errors import RetrievalError
 from nanorag.retrieval.base import Retriever
@@ -26,6 +35,64 @@ SOURCE = "hybrid:rrf"
 #: retriever's very top ranks do not completely dominate the sum, small
 #: enough that rank still matters more than mere participation count.
 DEFAULT_RRF_K = 60
+
+
+def rrf_fuse(
+    result_lists: Sequence[Sequence[ScoredChunk]],
+    k: int,
+    *,
+    rrf_k: int = DEFAULT_RRF_K,
+    source: str = SOURCE,
+) -> list[ScoredChunk]:
+    """Fuse several ranked ``ScoredChunk`` lists into one by Reciprocal Rank Fusion.
+
+    Parameters
+    ----------
+    result_lists
+        One ranked list per retriever (or, for
+        ``MultiQueryRetriever``, per query phrasing), each already
+        best-first.
+    k
+        How many fused results to return.
+    rrf_k
+        The RRF constant. Defaults to :data:`DEFAULT_RRF_K`.
+    source
+        ``ScoredChunk.source`` on every returned hit.
+
+    Returns
+    -------
+    list[ScoredChunk]
+        At most *k* hits, ranked by fused score descending, ties broken by
+        chunk id (matching every other retriever's convention). Each
+        unique chunk's ``Chunk`` object is taken from whichever list
+        returned it first — their content for a given ``chunk_id`` is
+        always identical, since every list is read from the same document
+        store.
+
+    Raises
+    ------
+    RetrievalError
+        *k* < 1, or *rrf_k* < 1.
+
+    """
+    if k < 1:
+        raise RetrievalError(f"k must be >= 1, got {k}")
+    if rrf_k < 1:
+        raise RetrievalError(f"rrf_k must be >= 1, got {rrf_k}")
+
+    fused: dict[str, float] = {}
+    chunk_for_id: dict[str, Chunk] = {}
+    for hits in result_lists:
+        for rank, hit in enumerate(hits, start=1):
+            cid = hit.chunk.chunk_id
+            fused[cid] = fused.get(cid, 0.0) + 1.0 / (rrf_k + rank)
+            chunk_for_id.setdefault(cid, hit.chunk)
+
+    ranked = sorted(fused.items(), key=lambda pair: (-pair[1], pair[0]))[:k]
+    return [
+        ScoredChunk(chunk=chunk_for_id[cid], score=score, source=source)
+        for cid, score in ranked
+    ]
 
 
 class HybridRetriever:
@@ -118,17 +185,8 @@ class HybridRetriever:
             raise RetrievalError(f"k must be >= 1, got {final_k}")
         candidate_k = max(self._candidate_k or final_k, final_k)
 
-        fused: dict[str, float] = {}
-        chunk_for_id: dict[str, Chunk] = {}
-        for retriever in self._retrievers:
-            hits = retriever.retrieve(query, k=candidate_k, filter=filter)
-            for rank, hit in enumerate(hits, start=1):
-                cid = hit.chunk.chunk_id
-                fused[cid] = fused.get(cid, 0.0) + 1.0 / (self._rrf_k + rank)
-                chunk_for_id.setdefault(cid, hit.chunk)
-
-        ranked = sorted(fused.items(), key=lambda pair: (-pair[1], pair[0]))[:final_k]
-        return [
-            ScoredChunk(chunk=chunk_for_id[cid], score=score, source=SOURCE)
-            for cid, score in ranked
+        result_lists = [
+            retriever.retrieve(query, k=candidate_k, filter=filter)
+            for retriever in self._retrievers
         ]
+        return rrf_fuse(result_lists, final_k, rrf_k=self._rrf_k, source=SOURCE)

@@ -6,7 +6,7 @@ import pytest
 
 from nanorag.errors import RetrievalError
 from nanorag.hashing import chunk_id, content_hash, stable_doc_id
-from nanorag.retrieval.hybrid import DEFAULT_RRF_K, SOURCE, HybridRetriever
+from nanorag.retrieval.hybrid import DEFAULT_RRF_K, SOURCE, HybridRetriever, rrf_fuse
 from nanorag.types import Chunk, Document, ScoredChunk
 from tests.fakes import FakeRetriever
 
@@ -162,6 +162,16 @@ def test_filter_and_query_are_forwarded_to_every_retriever():
     HybridRetriever(a, b).retrieve("the question", filter={"kind": "x"})
     assert a.calls[0] == ("the question", 10, {"kind": "x"})
     assert b.calls[0] == ("the question", 10, {"kind": "x"})
+
+
+def test_rrf_fuse_rejects_non_positive_k_and_rrf_k():
+    # HybridRetriever always validates before calling rrf_fuse, so these
+    # only exercise rrf_fuse's own guard — it is a public function other
+    # callers (query_transform.MultiQueryRetriever) invoke directly.
+    with pytest.raises(RetrievalError):
+        rrf_fuse([[_hit(0, 0.9)]], 0)
+    with pytest.raises(RetrievalError):
+        rrf_fuse([[_hit(0, 0.9)]], 1, rrf_k=0)
 
 
 def test_a_retrievers_own_error_propagates():

@@ -170,6 +170,26 @@ class NumpyVectorStore:
             self._id_to_row = new_id_to_row
             self._alive = new_alive
 
+    def get_vectors(self, chunk_ids: Sequence[str]) -> dict[str, np.ndarray]:
+        """Return the stored (live) vectors for *chunk_ids*, keyed by id.
+
+        Ids that are not stored, or are tombstoned, are simply absent from
+        the result — mirroring ``SqliteDocumentStore.get_chunks_by_ids``.
+        Used by anything that needs a chunk's own embedding directly rather
+        than through a ``search`` (e.g. ``retrieval.mmr.MmrRetriever``'s
+        pairwise diversity term, plan.md §9 Phase F session F3).
+        """
+        with self._lock:
+            matrix = self._matrix
+            id_to_row = self._id_to_row
+            alive = self._alive
+        found: dict[str, np.ndarray] = {}
+        for cid in chunk_ids:
+            row = id_to_row.get(cid)
+            if row is not None and alive[row]:
+                found[cid] = matrix[row].copy()
+        return found
+
     def search(
         self,
         query: np.ndarray,

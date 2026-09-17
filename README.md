@@ -8,7 +8,8 @@ afternoon, run it against your own documents, and operate it for free.
 > both closed: citations resolve to text spans, there's a command line,
 > quality is a number enforced in CI, and re-ingesting a changed corpus is
 > correct and cheap. Phase F (quality — reranking, hybrid retrieval, MMR)
-> is underway, sessions F1 and F2 done.** The package installs, lints, type-checks,
+> is feature-complete, sessions F1–F3 done — Gate F review next.** The
+> package installs, lints, type-checks,
 > tests and builds a wheel on Linux and Windows. It loads real files
 > (`loaders/`), cleans and chunks them (`cleaning/`, `chunking/`), embeds
 > them locally (`embeddings/` — `fastembed`/ONNX, no torch, cached and
@@ -44,7 +45,8 @@ afternoon, run it against your own documents, and operate it for free.
 > review verified both Phase E acceptance criteria literally: no orphan
 > rows in any table after a combined add/edit/delete cycle, and the Phase
 > D eval numbers are bit-identical before and after resyncing the real
-> committed corpus unedited. **Phase F (quality) is underway** — session
+> committed corpus unedited. **Phase F (quality) is feature-complete
+> (sessions F1–F3), Gate F review next** — session
 > F1 added `rerank/`: `IdentityReranker` (the default, a pure slice —
 > `Rag` behaves exactly as before Phase F until a reranker is wired in),
 > `JinaReranker` and `LocalCrossEncoderReranker` (offline, via
@@ -66,7 +68,20 @@ afternoon, run it against your own documents, and operate it for free.
 > exists yet for their score scales and `abstain_rate` on genuinely
 > unrelated questions measurably regresses without one. See
 > [`docs/evaluation.md`](docs/evaluation.md) "Hybrid retrieval" for the full
-> numbers and the one-liner to opt in today. See [`plan.md`](plan.md) §9
+> numbers and the one-liner to opt in today. **Session F3 added three more
+> opt-in `Retriever` wrappers**: `MmrRetriever` (diversify by Maximal
+> Marginal Relevance), `ParentExpandingRetriever` (widen each hit to its
+> neighbouring chunks) and `MultiQueryRetriever` (retrieve for several
+> generator-rewritten phrasings of one question, RRF-fused). **Measured**:
+> MMR is this phase's first honest negative result (every setting lands
+> within noise of the dense baseline on this corpus — nothing near-duplicate
+> to diversify away from), parent-document expansion is a real but modest
+> win (`ndcg@5` +0.025 to +0.037) driven by wider spans catching more gold
+> quotes rather than better ranking, and query transforms were built and
+> unit-tested but not measured live (no generator was available this
+> session). See [`docs/evaluation.md`](docs/evaluation.md) "MMR,
+> parent-document expansion, query transforms" for the full numbers and
+> why none is a default. See [`plan.md`](plan.md) §9
 > for the phased roadmap and [`ROADMAP.md`](ROADMAP.md) for the condensed
 > version.
 

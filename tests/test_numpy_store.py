@@ -241,3 +241,39 @@ def test_gather_and_in_place_scoring_paths_agree_with_brute_force(allowed_count)
     got = store.search(query, k=3, allowed_ids=allowed)
     assert [cid for cid, _ in got] == [cid for cid, _ in expected]
     assert [s for _, s in got] == pytest.approx([s for _, s in expected], abs=1e-6)
+
+
+# --- get_vectors ---------------------------------------------------------------
+
+
+def test_get_vectors_returns_stored_vectors_bit_exact():
+    store = NumpyVectorStore(dim=2)
+    a, b = _unit([1, 0]), _unit([0, 1])
+    store.upsert(["a", "b"], np.stack([a, b]))
+    got = store.get_vectors(["a", "b"])
+    assert set(got) == {"a", "b"}
+    assert np.array_equal(got["a"], a)
+    assert np.array_equal(got["b"], b)
+
+
+def test_get_vectors_omits_unknown_and_tombstoned_ids():
+    store = NumpyVectorStore(dim=2)
+    store.upsert(["a", "b"], np.stack([_unit([1, 0]), _unit([0, 1])]))
+    store.delete(["b"])
+    got = store.get_vectors(["a", "b", "nope"])
+    assert set(got) == {"a"}
+
+
+def test_get_vectors_empty_request_or_empty_store():
+    store = NumpyVectorStore(dim=2)
+    assert store.get_vectors([]) == {}
+    store.upsert(["a"], np.stack([_unit([1, 0])]))
+    assert store.get_vectors([]) == {}
+
+
+def test_get_vectors_returns_copies_not_views():
+    store = NumpyVectorStore(dim=2)
+    store.upsert(["a"], np.stack([_unit([1, 0])]))
+    got = store.get_vectors(["a"])
+    got["a"][0] = 999.0
+    assert store.get_vectors(["a"])["a"][0] != 999.0

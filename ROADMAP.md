@@ -12,7 +12,7 @@ contiguous release list.
 | **C — First answers (MVP)** | `v0.1.0` | Documents in, cited answer out — free key or fully offline. First public release. | **done — `v0.1.0`, Gate C passed** |
 | **D — Trust** | `v0.3.0` | Citations resolving to text spans, a CLI, quality as numbers in CI (≥ 200-item eval set). | **done — `v0.3.0`, Gate D passed** |
 | **E — Durability** | `v0.4.0` | Re-ingesting a changed corpus is correct and cheap. | **done — `v0.4.0`, Gate E passed** |
-| **F — Quality** | `v0.6.0` | Beat the Phase D baseline with evidence — reranking, BM25/hybrid, MMR. Negative results published. | F1, F2 done — F3 next |
+| **F — Quality** | `v0.6.0` | Beat the Phase D baseline with evidence — reranking, BM25/hybrid, MMR. Negative results published. | F1–F3 done — Gate F next |
 | **G — Reach** | `v0.7.0` | PDF/HTML loaders, external stores (Qdrant, pgvector), hosted embeddings — without touching the core. | not started |
 | **H — Production** | `v1.0.0` | Structured logging, cost accounting, deployment guide, threat model, API freeze. | not started |
 
@@ -405,6 +405,45 @@ contiguous release list.
     Acceptance's "every delta, including negative ones, documented" rules
     out doing quietly. Measuring a BM25/RRF-scale abstention floor is a
     named follow-up, not dropped.
+
+- **F3** ✅ — Three composable `Retriever` wrappers, all opt-in:
+  `retrieval/mmr.py` (`MmrRetriever` — Maximal Marginal Relevance;
+  relevance from the wrapped retriever's own min-max-normalised score,
+  diversity from the candidates' own embeddings via new
+  `NumpyVectorStore.get_vectors()`), `retrieval/parent.py`
+  (`ParentExpandingRetriever` — widens each hit to its neighbouring
+  chunks, re-sliced from the owning `Document.text`, never a
+  concatenation that would double-count chunker overlap),
+  `retrieval/query_transform.py` (`MultiQueryRetriever` — retrieves for
+  several phrasings of one question, fused by `retrieval.hybrid.
+  rrf_fuse`, the RRF arithmetic factored out of `HybridRetriever` so the
+  two RRF users cannot drift apart; `QueryTransform` protocol,
+  `IdentityQueryTransform` the default no-op, `LLMQueryTransform` the
+  one deliberate exception to "one network call per query" — it needs a
+  generator call before retrieval starts). New `QueryTransformError`.
+  **Composition order is a documented constraint**: `MmrRetriever` must
+  sit inside (closer to the base retriever than)
+  `ParentExpandingRetriever`, since expansion changes chunk identity and
+  MMR looks candidates' vectors up by id.
+  - **Measured against the real committed corpus/thresholds**
+    (`benchmarks/f3_sweep.py`, `docs/evaluation.md` "MMR, parent-document
+    expansion, query transforms"): **MMR is this phase's first honest
+    negative result** — every `lambda_mult` tested (0.3/0.5/0.7) lands
+    within noise of the dense baseline (`ndcg@5` 0.690–0.701 vs. 0.698),
+    because `nanorag-docs` rarely puts near-duplicate chunks in one
+    query's top candidates for MMR to trade away in the first place; not
+    enabled by default, correctly, since it does not clear the bar.
+    **Parent-document expansion is a real but modest win** — `ndcg@5`
+    +0.025 (window=1) to +0.037 (window=2), `recall@1` 0.544 → 0.582 —
+    driven by wider spans catching more gold-span overlaps at the *same*
+    ranking (expansion never reorders hits), not by better retrieval;
+    not defaulted on for two documented costs, not a quality objection:
+    wider chunks pressure the context token budget (unmeasured by a
+    retrieval-only sweep), and adjacent hits can expand into
+    overlapping-but-undeduped spans. **Query transforms were built and
+    unit-tested (fakes/`FakeGenerator`) but not measured live** — no
+    generator was available this session, matching F1's `JinaReranker`
+    situation; a live sweep is a named follow-up.
 
 ## Out of scope through 1.0
 

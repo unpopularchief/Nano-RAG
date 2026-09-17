@@ -425,6 +425,93 @@ rag.retriever = bm25  # BM25 alone, or:
 rag.retriever = HybridRetriever(dense, bm25, candidate_k=32)  # the best-measured row above
 ```
 
+## MMR, parent-document expansion, query transforms (Phase F, session F3)
+
+**Measured with `benchmarks/f3_sweep.py`**, on the same committed corpus,
+thresholds and 128/64 chunker default as above — the "dense (baseline)"
+row reproduces `thresholds.json` exactly.
+
+| retriever | param | recall@1 | recall@5 | recall@10 | mrr | ndcg@5 | false_abstain | secs |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| dense (baseline) | — | 0.544 | 0.836 | 0.880 | 0.659 | 0.698 | 0.003 | 59 |
+| mmr | lambda=0.3, candidate_k=32 | 0.544 | 0.823 | 0.886 | 0.655 | 0.690 | 0.000 | 57 |
+| mmr | lambda=0.5, candidate_k=32 | 0.544 | 0.836 | 0.890 | 0.659 | 0.697 | 0.000 | 57 |
+| mmr | lambda=0.7, candidate_k=32 | 0.544 | 0.839 | 0.880 | 0.661 | 0.701 | 0.000 | 58 |
+| parent-expanding | window=1 | 0.569 | 0.861 | 0.909 | 0.684 | 0.723 | 0.003 | 58 |
+| parent-expanding | window=2 | 0.582 | 0.874 | 0.924 | 0.696 | 0.735 | 0.003 | 55 |
+
+**MMR is a genuine negative result on this corpus — the honest kind Phase
+F's own Acceptance criterion asks for ("every delta, including negative
+ones, documented"), the first Phase F technique that does not clear the
+bar.** Every `lambda_mult` tested lands within noise of the baseline
+(`ndcg@5` 0.690–0.701 vs. 0.698) — diversifying away from the single best
+match neither helps nor meaningfully hurts, because this corpus rarely
+puts several near-duplicate chunks in one query's top candidates to begin
+with (`nanorag-docs` is technical documentation with one authoritative
+place for most facts, not a corpus with redundant restatements across
+files). MMR's mechanism has nothing to trade against on a query like that:
+trading a small amount of relevance for diversity when there is no
+redundant runner-up to diversify *away from* just removes a good hit.
+**Not enabled by default** — correctly, since it does not beat the
+baseline — and left available for corpora where genuine near-duplication
+in the top candidates is a real problem (a corpus scraped from several
+overlapping sources, say).
+
+**Parent-document (neighbour-window) expansion is a real, if modest, win
+— `ndcg@5` +0.025 (window=1) to +0.037 (window=2) — but it measures a
+different thing than F1's/F2's wins, worth being precise about.**
+`ParentExpandingRetriever` never changes *which* chunk ranks where (its
+docstring states this as a guarantee, and the sweep's ranking order is
+identical to the dense baseline's own) — it only widens each hit's
+`start_char`/`end_char` before ``recall``/``ndcg`` check whether that span
+overlaps a gold quote. A narrow chunk whose boundary just misses the gold
+span often has that gold span fall inside its *widened* neighbour window
+instead, which is exactly why `recall@1` moves (0.544 → 0.582) even though
+the top-ranked hit is the same chunk before and after expansion. This is a
+real effect with genuine production value (a wider excerpt is more likely
+to actually contain the sentence a citation needs, which is the entire
+point of small-to-big retrieval) — but it is a measurement of "does the
+shown span cover the answer," not "did retrieval rank the right document
+higher," and the two should not be conflated when reading the numbers.
+**Not enabled by default**, for two reasons named in `retrieval/parent.py`
+rather than discovered here: (1) a wider chunk consumes more of the
+context token budget per hit, so `ContextBuilder` fits fewer hits before
+truncating — a real trade-off this retrieval-only sweep cannot see, since
+it never runs the full `query()` path with a real budget; (2) two hits
+adjacent in the same result list expand into overlapping-but-not-identical
+spans that `ContextBuilder`'s exact-text dedup does not catch, wasting
+some of that budget on repeated sentences. Both are documented limitations
+in the module, not fixed here. A full `evaluate_answers` run (answer
+quality, not just retrieval-span overlap) with expansion wired in is a
+named follow-up.
+
+**Query transforms (`retrieval.query_transform`) were built and
+unit-tested against fakes but not measured live — no generator was
+available this session, the same situation F1's `JinaReranker` was in.**
+`LLMQueryTransform` needs a real model call *before* retrieval even
+starts — the one deliberate exception to plan.md §4's "the only network
+call in the whole engine is the single generation request per query" —
+which is exactly why `QueryTransform` is opt-in behind an explicit
+constructor argument and `IdentityQueryTransform` (a true no-op — see
+`retrieval/query_transform.py`) is `MultiQueryRetriever`'s default. A live
+sweep comparing `MultiQueryRetriever` against a plain retriever, once a
+generator is available, is a named follow-up, not silently dropped.
+
+**Wire any of these in by hand** (all three stay opt-in):
+
+```python
+from nanorag.retrieval import DenseRetriever, MmrRetriever, MultiQueryRetriever
+from nanorag.retrieval.parent import ParentExpandingRetriever
+from nanorag.retrieval.query_transform import LLMQueryTransform
+
+dense = DenseRetriever(rag.embedder, rag.vectors, rag.docs, k=rag.retrieve_k)
+rag.retriever = MmrRetriever(dense, rag.vectors, candidate_k=32, lambda_mult=0.7)
+# or, the best-measured configuration above:
+rag.retriever = ParentExpandingRetriever(dense, rag.docs, window=2)
+# or, once a generator is available for the extra call:
+rag.retriever = MultiQueryRetriever(dense, LLMQueryTransform(rag.generator))
+```
+
 ## Negative results and caveats
 
 - **Overlap at 256 tokens and above buys nothing measurable** (≤ 2 pp,

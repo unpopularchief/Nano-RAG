@@ -18,6 +18,7 @@ Hierarchy
         ``IndexModelMismatch``
     ``RetrievalError``
     ``RerankError``
+    ``QueryTransformError``
     ``GenerationError``
     ``EvaluationError``
     ``ProviderError``
@@ -139,6 +140,17 @@ class RerankError(NanoRagError):
     raw provider error — so ``Rag.retrieve()`` can catch one narrow type and
     degrade to the retriever's own order rather than failing the query
     (plan.md §9 Phase F Tests).
+    """
+
+
+class QueryTransformError(NanoRagError):
+    """A query transform failed to produce alternative phrasings.
+
+    ``LLMQueryTransform`` raises this — never a raw provider error — so
+    ``MultiQueryRetriever`` can catch one narrow type and degrade to
+    retrieving with the original query alone rather than failing the query
+    (plan.md §9 Phase F session F3, the same "optional stage never fails
+    the query" contract ``RerankError`` established at F1).
     """
 
 
