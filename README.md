@@ -4,8 +4,8 @@ A small, readable, production-capable retrieval-augmented generation **engine**
 — not a framework. The goal is that you can read the whole thing in an
 afternoon, run it against your own documents, and operate it for free.
 
-> **Status: `v0.6.0` — Phases D, E and F are done and Gate D/Gate E/Gate F
-> have all closed: citations resolve to text spans, there's a command
+> **Status: `v0.6.0` — Phase G has begun: G1 is done; G2/G3 and Gate G remain.
+> Gates D, E and F are closed: citations resolve to text spans, there's a command
 > line, quality is a number enforced in CI, re-ingesting a changed corpus
 > is correct and cheap, and reranking / hybrid retrieval / MMR / parent
 > expansion / query transforms are all measured against the Phase D
@@ -82,7 +82,13 @@ afternoon, run it against your own documents, and operate it for free.
 > unit-tested but not measured live (no generator was available this
 > session). See [`docs/evaluation.md`](docs/evaluation.md) "MMR,
 > parent-document expansion, query transforms" for the full numbers and
-> why none is a default. See [`ROADMAP.md`](ROADMAP.md) for the phased
+> why none is a default. **Phase G session G1 adds opt-in PDF and HTML
+> input:** `PdfLoader` uses `pypdf`, `HtmlLoader` uses `selectolax`, both
+> keep their dependency lazy and both preserve exact offsets into the
+> extracted `Document.text`; `strip_boilerplate()` removes only explicit
+> whole lines or page-edge lines repeated across PDF pages. See
+> [Optional document formats](#optional-document-formats). See
+> [`ROADMAP.md`](ROADMAP.md) for the phased
 > roadmap (condensed from `plan.md`, the project's internal design doc —
 > not part of this repo).
 
@@ -135,6 +141,39 @@ generator at Ollama (`NANORAG_PROFILE=local`) removes that too.
 The same flow with no model, no key and no network at all:
 `uv run python examples/offline_fakes.py`. The README flow as a script:
 `examples/quickstart.py`.
+
+## Optional document formats
+
+Plain text and Markdown need no parser extra. Install either or both optional
+loaders when the corpus needs them:
+
+```bash
+uv add "nanorag[pdf]"          # pypdf, pure Python
+uv add "nanorag[html]"         # selectolax
+# or: uv add "nanorag[pdf,html]"
+```
+
+With the extra installed, `DirectoryLoader` and therefore `Rag.ingest_path()`
+recognise `.pdf`, `.html` and `.htm` automatically. Direct use is available as
+`nanorag.loaders.PdfLoader` / `HtmlLoader`. Calling one without its extra
+raises `ConfigError` with the exact install command; importing
+`nanorag.loaders` never imports either parser.
+
+PDF page text is separated by form feeds. Character offsets and citations are
+exact into the extracted `Document.text`, not coordinates in the original PDF
+page layout—`pypdf` necessarily reflows positioned glyphs. HTML extraction
+drops scripts, styles and other non-content elements while keeping visible
+block boundaries. Site-specific navigation/footer lines can be removed
+explicitly before chunking:
+
+```python
+from nanorag.cleaning import strip_boilerplate
+
+text = strip_boilerplate(document.text, phrases={"Menu", "Privacy policy"})
+```
+
+For PDFs, the same function conservatively detects exact header/footer lines
+repeated at page edges; it never guesses away arbitrary body prose.
 
 ## Command line
 
@@ -231,7 +270,7 @@ runs, negative results and how to re-baseline: [`docs/evaluation.md`](docs/evalu
 ## Development
 
 ```bash
-uv sync --extra dev
+uv sync --extra dev --extra pdf --extra html
 uv run ruff check . && uv run ruff format --check .
 uv run mypy src
 uv run pytest -q

@@ -16,7 +16,9 @@ from pathlib import Path
 from nanorag.errors import LoaderError
 from nanorag.loaders.base import Loader
 from nanorag.loaders.globbing import glob_match
+from nanorag.loaders.html import HtmlLoader
 from nanorag.loaders.markdown import MarkdownLoader
+from nanorag.loaders.pdf import PdfLoader
 from nanorag.loaders.text import TextLoader
 from nanorag.types import IngestReport, LoadIssue
 
@@ -25,6 +27,9 @@ DEFAULT_LOADERS: dict[str, Loader] = {
     ".txt": TextLoader(),
     ".md": MarkdownLoader(),
     ".markdown": MarkdownLoader(),
+    ".pdf": PdfLoader(),
+    ".html": HtmlLoader(),
+    ".htm": HtmlLoader(),
 }
 
 

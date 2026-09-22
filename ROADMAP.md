@@ -14,7 +14,7 @@ contiguous release list.
 | **D — Trust** | `v0.3.0` | Citations resolving to text spans, a CLI, quality as numbers in CI (≥ 200-item eval set). | **done — `v0.3.0`, Gate D passed** |
 | **E — Durability** | `v0.4.0` | Re-ingesting a changed corpus is correct and cheap. | **done — `v0.4.0`, Gate E passed** |
 | **F — Quality** | `v0.6.0` | Beat the Phase D baseline with evidence — reranking, BM25/hybrid, MMR. Negative results published. | **done — `v0.6.0`, Gate F passed** |
-| **G — Reach** | `v0.7.0` | PDF/HTML loaders, external stores (Qdrant, pgvector), hosted embeddings — without touching the core. | not started |
+| **G — Reach** | `v0.7.0` | PDF/HTML loaders, external stores (Qdrant, pgvector), hosted embeddings — without touching the core. | **G1 done — G2 next** |
 | **H — Production** | `v1.0.0` | Structured logging, cost accounting, deployment guide, threat model, API freeze. | not started |
 
 ## Phase A sessions
@@ -469,6 +469,29 @@ contiguous release list.
   cross-encoder's win already stands on its own measured merit against
   the Phase D baseline, independent of how it compares to Jina. See
   CHANGELOG `[0.6.0]` for the full list.
+
+## Phase G sessions
+
+- **G1** ✅ — `loaders/pdf.py` (`PdfLoader`, optional `pypdf` via `[pdf]`),
+  `loaders/html.py` (`HtmlLoader`, optional `selectolax` via `[html]`) and
+  `cleaning/boilerplate.py` (`strip_boilerplate`). Both parser dependencies
+  are imported only when their loader runs: core imports and `.txt`/`.md`
+  ingestion remain zero-extra, while a missing parser raises `ConfigError`
+  naming the exact `uv add` command. `DirectoryLoader` recognises `.pdf`,
+  `.html` and `.htm`; encrypted/malformed input becomes `LoaderError`, so one
+  bad file is recorded in `IngestReport.failed` without aborting the walk.
+  PDF input, page count and extracted-character bounds cover compressed-input
+  expansion; scripts/styles/non-content HTML nodes are excluded. The committed
+  three-page PDF and HTML fixtures load, and tests assert every chunk is exactly
+  `Document.text[start_char:end_char]` for both extracted formats. PDF offsets
+  intentionally address reflowed extracted text, not original page geometry.
+  Boilerplate stripping is conservative: caller-declared whole lines plus
+  exact page-edge lines repeated across at least three form-feed-separated
+  pages; retained text is not semantically rewritten.
+
+- **G2** — next: shared store conformance suite plus Qdrant and pgvector
+  adapters. ANN recall gets a separate measured baseline; Phase D thresholds
+  remain exact-store-only.
 
 ## Out of scope through 1.0
 

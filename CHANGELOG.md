@@ -7,6 +7,30 @@ breaking changes bump the minor).
 
 ## [Unreleased]
 
+### Added
+
+- **Phase G, session G1 — optional PDF/HTML loaders and boilerplate
+  cleaning.** `nanorag.loaders.PdfLoader` uses lazily imported `pypdf`
+  (`[pdf]` extra), records `application/pdf` plus page count, separates pages
+  with form feeds and bounds input size, page count and extracted character
+  count. `nanorag.loaders.HtmlLoader` uses lazily imported `selectolax`
+  (`[html]` extra), extracts visible text with block boundaries, drops
+  script/style/non-content nodes and records an optional title. Missing extras
+  raise `ConfigError` naming the exact install; malformed/encrypted input is a
+  per-file `LoaderError`.
+- `nanorag.cleaning.strip_boilerplate`: a pure, conservative transform that
+  removes caller-declared whole lines and exact page-edge lines repeated across
+  at least three form-feed-separated pages, without rewriting retained text.
+- `tests/data/sample.html` plus PDF/HTML extraction, resource-bound,
+  missing-extra, per-file-failure and exact chunk-offset coverage. CI installs
+  both parser extras across the Linux/Windows × Python 3.11–3.13 matrix.
+
+### Changed
+
+- `DirectoryLoader` now recognises `.pdf`, `.html` and `.htm` through lazy
+  loader instances while `.txt`/`.md` and importing `nanorag.loaders` remain
+  zero-extra.
+
 ## [0.6.0] — 2026-09-18
 
 Phase F: reranking, hybrid retrieval, MMR, parent-document expansion and

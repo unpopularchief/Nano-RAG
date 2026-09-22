@@ -241,3 +241,17 @@ def test_directory_loader_does_not_follow_symlinked_directory_loop(tmp_path):
     loaded_uris = {d.source_uri for d in report.loaded}
     assert "sub/f.txt" in loaded_uris
     assert not any(uri.startswith("sub/loop/") for uri in loaded_uris)
+
+
+def test_importing_loaders_does_not_eagerly_import_optional_parsers():
+    # Run in a fresh process because the G1 loader tests import both optional
+    # packages elsewhere in this pytest process.
+    import subprocess
+    import sys
+
+    code = (
+        "import sys; import nanorag.loaders; "
+        "assert 'pypdf' not in sys.modules; "
+        "assert 'selectolax' not in sys.modules"
+    )
+    subprocess.run([sys.executable, "-c", code], check=True)

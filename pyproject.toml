@@ -94,8 +94,15 @@ strict = true
 python_version = "3.12"
 
 [[tool.mypy.overrides]]
-# No upstream stubs; strict mode fails on the bare import otherwise.
-module = ["fastembed.*", "onnxruntime.*", "tiktoken.*"]
+# Optional packages may be absent in core-only type checks; fastembed,
+# onnxruntime and tiktoken also lack complete upstream stubs.
+module = [
+    "fastembed.*",
+    "onnxruntime.*",
+    "pypdf.*",
+    "selectolax.*",
+    "tiktoken.*",
+]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

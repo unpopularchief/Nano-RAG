@@ -34,7 +34,8 @@ Frozen dataclasses (`frozen=True, slots=True`): `Document`, `Chunk`,
 type — `ScoredChunk` wraps rather than subclasses. Validating `__post_init__`.
 Metadata is a flat `str -> JSON scalar` map; nesting breaks filter compilation.
 Reserved `nanorag.*` metadata key namespace: `nanorag.mime` (a loader's own
-guess), `nanorag.heading_path` (`MarkdownChunker`), `nanorag.dedup_group` /
+guess), `nanorag.pages` / `nanorag.title` (PDF/HTML source metadata),
+`nanorag.heading_path` (`MarkdownChunker`), `nanorag.dedup_group` /
 `nanorag.duplicate_of` (near-duplicate detection, session E2 — a document
 opts a chunk-level check in by setting the group key; a flagged chunk is
 kept, tagged with the winner's id, never dropped).
@@ -46,6 +47,30 @@ kept, tagged with the winner's id, never dropped).
 - `chunk_id` hashes the chunk's **own** normalised text, not the document
   hash, so an edit rotates only the ids of chunks that actually changed.
 - Hashes are deterministic across processes, platforms and `PYTHONHASHSEED`.
+
+## Optional loaders and cleaning (Phase G, session G1)
+
+- `PdfLoader` and `HtmlLoader` are ordinary `Loader` implementations in
+  `nanorag.loaders`; `.pdf`, `.html` and `.htm` are in `DEFAULT_LOADERS`.
+  Their `pypdf` / `selectolax` imports happen inside `load()`, never at module
+  import time. This keeps `.txt`/`.md` zero-extra and makes missing optional
+  dependencies fail at the use boundary with `ConfigError` naming the exact
+  install command.
+- Parse/decode/resource failures are `LoaderError`. `DirectoryLoader` catches
+  exactly that type and records one failed file without stopping the walk;
+  `ConfigError` still propagates because an uninstalled requested component is
+  a deployment problem, not malformed input.
+- PDF pages are joined with `"\n\f\n"`. A later chunk's offsets are exact into
+  the extracted `Document.text`; they do not claim page-layout coordinates,
+  because `pypdf` reflows positioned glyphs. The PDF loader bounds input bytes,
+  page count and extracted characters.
+- HTML extraction excludes script/style/noscript/template/SVG/canvas content
+  and preserves block boundaries. Site-specific navigation is not guessed at
+  by the loader: cleaning remains a separate, explicit pure-text step.
+- `strip_boilerplate()` removes only caller-declared whole lines and exact
+  lines repeated at PDF page edges. It defaults to requiring three pages and
+  leaves every retained line untouched. Offsets after cleaning, like after any
+  cleaner, address the cleaned text passed to the chunker.
 
 ## Providers
 

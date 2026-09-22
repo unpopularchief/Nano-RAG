@@ -41,6 +41,41 @@ class Loader(Protocol):
         ...
 
 
+def _check_file_size(path: Path, *, max_file_size: int = DEFAULT_MAX_FILE_SIZE) -> int:
+    """Return *path*'s size after enforcing the shared input-size limit.
+
+    Parameters
+    ----------
+    path
+        File whose size to inspect.
+    max_file_size
+        Largest accepted file, in bytes.
+
+    Returns
+    -------
+    int
+        The file size in bytes.
+
+    Raises
+    ------
+    LoaderError
+        *path* cannot be inspected or exceeds *max_file_size*.
+
+    """
+    try:
+        size = path.stat().st_size
+    except OSError as exc:
+        raise LoaderError(f"cannot stat {path}: {exc}", path=str(path)) from exc
+    if size > max_file_size:
+        raise LoaderError(
+            f"{path} is {size} bytes, exceeds max_file_size ({max_file_size})",
+            path=str(path),
+            size=size,
+            max_file_size=max_file_size,
+        )
+    return size
+
+
 def read_text_file(path: Path, *, max_file_size: int = DEFAULT_MAX_FILE_SIZE) -> str:
     """Decode *path* to text, applying the shared size and content guards.
 
@@ -57,17 +92,7 @@ def read_text_file(path: Path, *, max_file_size: int = DEFAULT_MAX_FILE_SIZE) ->
         not text, regardless of extension.
 
     """
-    try:
-        size = path.stat().st_size
-    except OSError as exc:
-        raise LoaderError(f"cannot stat {path}: {exc}", path=str(path)) from exc
-    if size > max_file_size:
-        raise LoaderError(
-            f"{path} is {size} bytes, exceeds max_file_size ({max_file_size})",
-            path=str(path),
-            size=size,
-            max_file_size=max_file_size,
-        )
+    _check_file_size(path, max_file_size=max_file_size)
 
     try:
         raw = path.read_bytes()
