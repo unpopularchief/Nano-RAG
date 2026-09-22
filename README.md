@@ -285,7 +285,7 @@ tests (`nanorag.embeddings.local.FastEmbedEmbedder`) are opt-in and download
 the pinned ONNX model on first run:
 
 ```bash
-uv sync --extra dev --extra local
+uv sync --extra dev --extra local --extra pdf --extra html
 uv run pytest -q -m local
 ```
 

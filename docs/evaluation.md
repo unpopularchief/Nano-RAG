@@ -56,7 +56,7 @@ Every metric is a pure function in `evaluation/retrieval_metrics.py` /
 ## Running it
 
 ```bash
-uv sync --extra dev --extra local
+uv sync --extra dev --extra local --extra pdf --extra html
 uv run nanorag eval datasets/nanorag-docs/dev.jsonl                      # retrieval, text report
 uv run nanorag eval datasets/nanorag-docs/dev.jsonl --json > report.json # every item row
 uv run nanorag eval datasets/nanorag-docs/dev.jsonl \

@@ -31,6 +31,13 @@ breaking changes bump the minor).
   loader instances while `.txt`/`.md` and importing `nanorag.loaders` remain
   zero-extra.
 
+### Fixed
+
+- The `Local embeddings` and scheduled `Eval gate` workflows now install the
+  `[pdf]` and `[html]` extras before pytest collection. Without them, the G1
+  loader test modules failed to import even when `-m local` or `-m eval` would
+  later deselect those tests.
+
 ## [0.6.0] — 2026-09-18
 
 Phase F: reranking, hybrid retrieval, MMR, parent-document expansion and
