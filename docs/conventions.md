@@ -242,6 +242,60 @@ itself is a plain, overridable attribute since session F2 (mirroring
   `docs/evaluation.md` "MMR, parent-document expansion, query transforms"
   has the full numbers and the mechanism explanation.
 
+## External stores (Phase G, session G2)
+
+- `store.base.VectorStore` is a `Protocol`, written now that there are
+  three implementations (plan.md §15 #1): `NumpyVectorStore` (Phase B),
+  `store.external.QdrantVectorStore` and `store.external.PgVectorStore`.
+  It is exactly `NumpyVectorStore`'s pre-existing public surface (`dim`,
+  `upsert`, `delete`, `search`, `get_vectors`, `compact`) — nothing added,
+  nothing dropped. `DenseRetriever`, `MmrRetriever` and `Rag` all type
+  against `VectorStore`, not the concrete `NumpyVectorStore`, so "swapping
+  the store changes one constructor line" is literally true.
+- **A `Filter` never reaches a `VectorStore`.** `DenseRetriever` always
+  resolves a filter to an `allowed_ids` set via
+  `SqliteDocumentStore.filter_chunk_ids` *before* calling `search()` — so
+  neither external adapter needs to understand `store.filters`' Mongo-shaped
+  grammar; `search()` only ever needs an id-set restriction. This is what
+  keeps both adapters small and is the real reason the "one constructor
+  line" claim holds.
+- **Qdrant point ids.** A `chunk_id` is a fixed-length sha256-hex string,
+  but Qdrant point ids must be an unsigned integer or a UUID. Every
+  `QdrantVectorStore` call maps a chunk id to a point id via
+  `uuid.uuid5(_NAMESPACE, chunk_id)` — deterministic, so both directions
+  (upsert/delete by chunk id; reading a hit's chunk id back from the
+  point's payload on search/get_vectors) need no separate mapping table
+  and are stable across restarts and processes.
+- **pgvector uses `pg8000`, not `psycopg`.** `psycopg` (v3) is LGPL and
+  needs the system `libpq`; `pg8000` is pure Python, BSD-3-Clause — the
+  same reasoning already applied to `pypdf`/`selectolax`. Vectors are sent
+  and read back as a `'[x,y,...]'` text literal cast to `vector` in SQL,
+  which avoids needing the separate `pgvector` Python package (its numpy
+  adapter only registers with `psycopg`/`asyncpg`). No ANN index
+  (`CREATE INDEX ... USING hnsw`) is created on the table — an unindexed
+  pgvector column does an exact sequential-scan KNN, matching
+  `NumpyVectorStore`'s exact search.
+- **Tie-break order is not a cross-backend guarantee.** `NumpyVectorStore`
+  breaks ties by ascending chunk id (documented, tested). Qdrant makes no
+  such promise. `PgVectorStore.search` happens to also break ties by
+  ascending chunk id, but only as a side effect of merging batched
+  candidate-restricted queries in Python (the same pattern
+  `SqliteDocumentStore.search_bm25` already uses for its own batched
+  pre-filter) — not a guarantee callers should rely on across backends.
+  `tests/test_store_conformance.py`'s shared suite is built with no score
+  ties for exactly this reason.
+- **Behaviour parity, not recall parity** (plan.md §18 F7). Qdrant is ANN
+  (HNSW) by default; the Phase D/F eval-gate thresholds are exact-store
+  only and do not apply to it. `tests/test_store_conformance.py` (`-m
+  integration`, needs Docker services — see `.github/workflows/
+  integration.yml`) checks that all three backends behave the same way,
+  never that an ANN backend's recall matches exact search; that is its own
+  future, separately measured baseline.
+- Connection failures (unreachable server, wrong extra not installed) are
+  hard `StoreError`/`ConfigError`s at construction time — unlike FTS5's
+  graceful capability-degrade in `SqliteDocumentStore`, an external store
+  is the backend a caller explicitly chose, so there is no silent fallback.
+
 ## Public types
 
 `Answer`, `Citation`, `Usage` and `Timings` are frozen since `v0.1.0`

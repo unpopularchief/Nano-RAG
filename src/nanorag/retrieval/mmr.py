@@ -16,9 +16,9 @@ to ``[0, 1]`` within the pool so ``lambda_mult`` means the same thing
 regardless of the wrapped stage's own score scale (cosine, BM25, RRF, ...).
 Diversity is always semantic: the pairwise term comes from the chunks' own
 embeddings in the vector store, fetched by id
-(:meth:`~nanorag.store.numpy_store.NumpyVectorStore.get_vectors`), never
-recomputed — every chunk is embedded at ingest regardless of which
-retriever finds it later.
+(:meth:`~nanorag.store.base.VectorStore.get_vectors`), never recomputed —
+every chunk is embedded at ingest regardless of which retriever finds it
+later.
 
 **Composition order matters.** ``MmrRetriever`` looks candidates' vectors
 up by their *current* ``chunk_id`` — wrap it *inside* (closer to the base
@@ -34,8 +34,8 @@ import numpy as np
 
 from nanorag.errors import RetrievalError
 from nanorag.retrieval.base import Retriever
+from nanorag.store.base import VectorStore
 from nanorag.store.filters import Filter
-from nanorag.store.numpy_store import NumpyVectorStore
 from nanorag.types import ScoredChunk
 
 #: The ``ScoredChunk.source`` every hit from this retriever carries.
@@ -56,8 +56,8 @@ class MmrRetriever:
         own ``ScoredChunk.score``).
     vectors
         Where each candidate's embedding is looked up by chunk id, for the
-        diversity term. Must be the same index *retriever* (transitively)
-        reads from.
+        diversity term. Any :class:`~nanorag.store.base.VectorStore`. Must
+        be the same index *retriever* (transitively) reads from.
     k
         Default number of results when ``retrieve`` is not given one.
     candidate_k
@@ -80,7 +80,7 @@ class MmrRetriever:
     def __init__(
         self,
         retriever: Retriever,
-        vectors: NumpyVectorStore,
+        vectors: VectorStore,
         *,
         k: int = 10,
         candidate_k: int | None = None,

@@ -67,6 +67,7 @@ from nanorag.rerank.base import Reranker
 from nanorag.rerank.identity import IdentityReranker
 from nanorag.retrieval.base import Retriever
 from nanorag.retrieval.dense import DenseRetriever
+from nanorag.store.base import VectorStore
 from nanorag.store.filters import Filter
 from nanorag.store.numpy_store import NumpyVectorStore
 from nanorag.store.sqlite_docs import SqliteDocumentStore
@@ -384,7 +385,11 @@ class Rag:
         The document store. Its recorded ``(model_id, dim)`` must match
         *embedder*.
     vectors
-        The in-memory index. Rebuilt from *docs* when omitted.
+        Any :class:`~nanorag.store.base.VectorStore` — the in-memory
+        ``NumpyVectorStore`` (rebuilt from *docs* when omitted) or an
+        external adapter (plan.md §9 Phase G session G2), e.g.
+        ``nanorag.store.external.QdrantVectorStore``. Swapping the store is
+        one constructor argument; nothing else here changes.
     chunker, loader, prompt_builder
         Defaults: ``RecursiveChunker()``, ``DirectoryLoader()``,
         ``PromptBuilder()``.
@@ -446,7 +451,7 @@ class Rag:
         embedder: Embedder,
         generator: Generator,
         docs: SqliteDocumentStore,
-        vectors: NumpyVectorStore | None = None,
+        vectors: VectorStore | None = None,
         chunker: Chunker | None = None,
         loader: DirectoryLoader | None = None,
         prompt_builder: PromptBuilder | None = None,

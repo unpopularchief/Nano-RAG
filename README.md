@@ -175,6 +175,39 @@ text = strip_boilerplate(document.text, phrases={"Menu", "Privacy policy"})
 For PDFs, the same function conservatively detects exact header/footer lines
 repeated at page edges; it never guesses away arbitrary body prose.
 
+## External vector stores
+
+The default `NumpyVectorStore` is in-memory, rebuilt from SQLite on start.
+Swapping it for Qdrant or Postgres/pgvector is one constructor argument —
+`DenseRetriever`, `MmrRetriever` and `Rag` all take any
+`nanorag.store.base.VectorStore`:
+
+```bash
+uv add "nanorag[qdrant]"       # qdrant-client
+uv add "nanorag[pgvector]"     # pg8000, pure Python, no libpq
+```
+
+```python
+from nanorag.store.external import QdrantVectorStore, PgVectorStore
+
+vectors = QdrantVectorStore(dim=768, url="http://localhost:6333")
+# or: vectors = PgVectorStore(dim=768, dsn="postgresql://user:pass@host/db")
+
+rag = Rag(embedder=embedder, generator=generator, docs=docs, vectors=vectors)
+```
+
+Both raise `ConfigError` naming the install command if their extra is
+missing, and `StoreError` if the server is unreachable or an existing
+collection/table was built at a different vector width. Neither ships an
+ANN index by default (pgvector: no `hnsw` index; Qdrant's own HNSW default
+only kicks in past its `full_scan_threshold`) — both do exact search, the
+same guarantee `NumpyVectorStore` makes. **Phase D/F's eval-gate thresholds
+are exact-store only** and do not apply to an ANN backend; a store
+conformance suite (`tests/test_store_conformance.py`, `-m integration`,
+needs Docker services) checks behaviour parity across all three backends,
+not recall parity. See `docs/conventions.md` "External stores" for the
+Qdrant point-id mapping and other design notes.
+
 ## Command line
 
 The same two paths as a command — `nanorag`, installed with the package:

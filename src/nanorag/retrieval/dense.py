@@ -17,8 +17,8 @@ from __future__ import annotations
 
 from nanorag.embeddings.base import Embedder
 from nanorag.errors import RetrievalError
+from nanorag.store.base import VectorStore
 from nanorag.store.filters import Filter
-from nanorag.store.numpy_store import NumpyVectorStore
 from nanorag.store.sqlite_docs import SqliteDocumentStore
 from nanorag.types import ScoredChunk
 
@@ -27,7 +27,7 @@ SOURCE = "dense"
 
 
 class DenseRetriever:
-    """Exact cosine top-*k* over a ``NumpyVectorStore``, pre-filtered via SQLite.
+    """Exact cosine top-*k* over a ``VectorStore``, pre-filtered via SQLite.
 
     Parameters
     ----------
@@ -36,7 +36,9 @@ class DenseRetriever:
         built with — its ``dim`` is checked against the vector store here;
         ``SqliteDocumentStore`` refuses a second ``model_id`` at ingest time.
     vectors
-        The in-memory index to search.
+        Any :class:`~nanorag.store.base.VectorStore` to search — the
+        in-memory ``NumpyVectorStore`` or an external adapter (plan.md §9
+        Phase G session G2).
     docs
         The document store the index was built from; resolves filters and
         turns hits back into ``Chunk`` objects.
@@ -53,7 +55,7 @@ class DenseRetriever:
     def __init__(
         self,
         embedder: Embedder,
-        vectors: NumpyVectorStore,
+        vectors: VectorStore,
         docs: SqliteDocumentStore,
         *,
         k: int = 10,

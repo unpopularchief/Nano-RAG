@@ -39,6 +39,11 @@ local = ["fastembed", "onnxruntime"]
 pdf = ["pypdf"]
 # HTML loader lands Phase G. MIT, fast C parser.
 html = ["selectolax"]
+# External vector store (Phase G, session G2). Apache-2.0.
+qdrant = ["qdrant-client>=1.19.1"]
+# External vector store (Phase G, session G2). Pure Python, BSD-3-Clause,
+# no libpq/system libs — chosen over psycopg (LGPL) for that reason.
+pgvector = ["pg8000>=1.31.5"]
 dev = ["pytest>=7", "pytest-cov", "ruff", "pre-commit", "mypy", "hypothesis"]
 
 [project.scripts]
@@ -95,11 +100,16 @@ python_version = "3.12"
 
 [[tool.mypy.overrides]]
 # Optional packages may be absent in core-only type checks; fastembed,
-# onnxruntime and tiktoken also lack complete upstream stubs.
+# onnxruntime and tiktoken also lack complete upstream stubs. qdrant-client
+# and pg8000 (Phase G, session G2) are absent from the main CI job's sync
+# (only `integration.yml` installs them) so they need the same treatment
+# even though qdrant-client itself ships inline types.
 module = [
     "fastembed.*",
     "onnxruntime.*",
+    "pg8000.*",
     "pypdf.*",
+    "qdrant_client.*",
     "selectolax.*",
     "tiktoken.*",
 ]

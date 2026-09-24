@@ -14,7 +14,7 @@ contiguous release list.
 | **D — Trust** | `v0.3.0` | Citations resolving to text spans, a CLI, quality as numbers in CI (≥ 200-item eval set). | **done — `v0.3.0`, Gate D passed** |
 | **E — Durability** | `v0.4.0` | Re-ingesting a changed corpus is correct and cheap. | **done — `v0.4.0`, Gate E passed** |
 | **F — Quality** | `v0.6.0` | Beat the Phase D baseline with evidence — reranking, BM25/hybrid, MMR. Negative results published. | **done — `v0.6.0`, Gate F passed** |
-| **G — Reach** | `v0.7.0` | PDF/HTML loaders, external stores (Qdrant, pgvector), hosted embeddings — without touching the core. | **G1 done — G2 next** |
+| **G — Reach** | `v0.7.0` | PDF/HTML loaders, external stores (Qdrant, pgvector), hosted embeddings — without touching the core. | **G1, G2 done — G3 next** |
 | **H — Production** | `v1.0.0` | Structured logging, cost accounting, deployment guide, threat model, API freeze. | not started |
 
 ## Phase A sessions
@@ -489,9 +489,34 @@ contiguous release list.
   exact page-edge lines repeated across at least three form-feed-separated
   pages; retained text is not semantically rewritten.
 
-- **G2** — next: shared store conformance suite plus Qdrant and pgvector
-  adapters. ANN recall gets a separate measured baseline; Phase D thresholds
-  remain exact-store-only.
+- **G2** ✅ — `store/base.py` (`VectorStore`, a `Protocol` written now at the
+  third implementation), `store/external/qdrant.py`
+  (`QdrantVectorStore`, optional `qdrant-client` via `[qdrant]`) and
+  `store/external/pgvector.py` (`PgVectorStore`, optional `pg8000` via
+  `[pgvector]` — pure Python/BSD, chosen over the LGPL `psycopg`).
+  `DenseRetriever`, `MmrRetriever` and `Rag` all type against `VectorStore`
+  rather than the concrete `NumpyVectorStore`, so swapping the store is one
+  constructor argument. A `Filter` never reaches a `VectorStore` — it is
+  always resolved to an `allowed_ids` set in SQLite first — so neither
+  adapter needs the filter grammar. Qdrant point ids are a deterministic
+  `uuid.uuid5` of the chunk id (Qdrant rejects arbitrary hex strings as
+  ids); pgvector gets no ANN index, so it stays exact like
+  `NumpyVectorStore`. Both raise `ConfigError` naming the install command
+  if their extra is missing, `StoreError` on an unreachable server or a
+  vector-width mismatch. A shared parametrised conformance suite
+  (`tests/test_store_conformance.py`, `-m integration`) runs the same
+  tests against all three backends; `.github/workflows/integration.yml`
+  provides Qdrant/Postgres-pgvector as CI services. Per plan.md §18 F7,
+  this checks behaviour parity, not recall parity — Qdrant's ANN default
+  sits outside the Phase D/F eval gate, which stays exact-store-only.
+  **No Docker was available in this sandbox this session**: the
+  `QdrantVectorStore` implementation was verified against a real
+  in-memory Qdrant engine (construction/reopen/dim-mismatch, upsert,
+  search, delete, get_vectors, allowed_ids, compact — all exercised
+  directly, not mocked); `PgVectorStore`'s SQL could only be unit-tested
+  at the pure-logic level (DSN parsing, vector-literal round-trip) since
+  no local Postgres was reachable either — its live behaviour is
+  unverified until `integration.yml`'s first CI run.
 
 ## Out of scope through 1.0
 

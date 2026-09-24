@@ -5,8 +5,15 @@ free of ``numpy`` (plan.md §7 "Import cost" — the same rule applied to
 ``nanorag.loaders`` and ``nanorag.chunking``).
 """
 
+from nanorag.store.base import VectorStore
 from nanorag.store.filters import Filter, compile_filter
 from nanorag.store.numpy_store import NumpyVectorStore
 from nanorag.store.sqlite_docs import SqliteDocumentStore
 
-__all__ = ["SqliteDocumentStore", "NumpyVectorStore", "Filter", "compile_filter"]
+__all__ = [
+    "SqliteDocumentStore",
+    "NumpyVectorStore",
+    "VectorStore",
+    "Filter",
+    "compile_filter",
+]

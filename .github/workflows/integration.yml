@@ -1,0 +1,56 @@
+name: Integration (external stores)
+
+# Runs the opt-in `-m integration` suite (tests/test_store_conformance.py)
+# against real Qdrant and Postgres/pgvector services (plan.md §9 Phase G
+# session G2). Kept out of ci.yml's matrix: Windows runners don't support
+# Linux service containers, and this only needs to run once, not across all
+# 6 matrix cells.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      qdrant:
+        image: qdrant/qdrant:latest
+        ports:
+          - 6333:6333
+
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: nanorag
+          POSTGRES_PASSWORD: nanorag
+          POSTGRES_DB: nanorag
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U nanorag"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: >-
+          uv sync --extra dev --extra qdrant --extra pgvector --python 3.12
+
+      - name: Test (store conformance, external backends)
+        env:
+          QDRANT_URL: http://localhost:6333
+          PGVECTOR_DSN: postgresql://nanorag:nanorag@localhost:5432/nanorag
+        run: uv run pytest -q -m integration

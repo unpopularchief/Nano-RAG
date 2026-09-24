@@ -9,6 +9,26 @@ breaking changes bump the minor).
 
 ### Added
 
+- **Phase G, session G2 — store conformance suite and external vector
+  stores.** `nanorag.store.base.VectorStore`: a `Protocol` (dim, upsert,
+  delete, search, get_vectors, compact) written now that there are three
+  implementations, so `DenseRetriever`, `MmrRetriever` and `Rag` all accept
+  any of them — swapping the store is one constructor argument.
+  `nanorag.store.external.QdrantVectorStore` (`[qdrant]` extra,
+  `qdrant-client`) maps a chunk id to a deterministic Qdrant point id via
+  `uuid.uuid5`, storing the original id in the point payload for the
+  reverse lookup. `nanorag.store.external.PgVectorStore` (`[pgvector]`
+  extra, `pg8000` — pure Python, BSD, chosen over the LGPL `psycopg`)
+  stores vectors as a pgvector column with no ANN index, so it stays exact
+  like `NumpyVectorStore`. Both raise `ConfigError` naming the install
+  command if their extra is missing, and `StoreError` on an unreachable
+  server or a vector-width mismatch against an existing collection/table.
+  `tests/test_store_conformance.py` (`-m integration`) runs one shared
+  suite against all three backends; `.github/workflows/integration.yml`
+  spins up real Qdrant and Postgres/pgvector services in CI.
+- `tests/test_store_external.py`: missing-extra `ConfigError`, constructor
+  argument validation, `uuid5` point-id determinism, DSN and pgvector
+  text-literal parsing — all pure-logic, no live service needed.
 - **Phase G, session G1 — optional PDF/HTML loaders and boilerplate
   cleaning.** `nanorag.loaders.PdfLoader` uses lazily imported `pypdf`
   (`[pdf]` extra), records `application/pdf` plus page count, separates pages
@@ -27,6 +47,9 @@ breaking changes bump the minor).
 
 ### Changed
 
+- `DenseRetriever`, `MmrRetriever` and `Rag.__init__`'s `vectors=` parameter
+  now type against `VectorStore` instead of the concrete `NumpyVectorStore`;
+  no behaviour change for existing callers.
 - `DirectoryLoader` now recognises `.pdf`, `.html` and `.htm` through lazy
   loader instances while `.txt`/`.md` and importing `nanorag.loaders` remain
   zero-extra.
