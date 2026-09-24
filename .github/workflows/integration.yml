@@ -47,7 +47,8 @@ jobs:
 
       - name: Install dependencies
         run: >-
-          uv sync --extra dev --extra qdrant --extra pgvector --python 3.12
+          uv sync --extra dev --extra qdrant --extra pgvector --extra pdf
+          --extra html --python 3.12
 
       - name: Test (store conformance, external backends)
         env:

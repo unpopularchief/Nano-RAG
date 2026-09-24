@@ -111,7 +111,14 @@ class QdrantVectorStore:
                 )
             else:
                 info = client.get_collection(collection_name)
-                existing_dim = info.config.params.vectors.size  # type: ignore[union-attr]
+                vectors_config = info.config.params.vectors
+                if not isinstance(vectors_config, VectorParams):
+                    raise StoreError(
+                        "existing Qdrant collection uses an unsupported "
+                        "vector configuration",
+                        collection_name=collection_name,
+                    )
+                existing_dim = vectors_config.size
                 if existing_dim != dim:
                     raise StoreError(
                         "existing Qdrant collection has a different vector width",
