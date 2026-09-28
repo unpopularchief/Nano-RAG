@@ -298,7 +298,8 @@ runs, negative results and how to re-baseline: [`docs/evaluation.md`](docs/evalu
 - **Single-process only through 1.0.** The in-memory vector index and the
   rate limiter are per-process. Multi-worker / multi-instance / serverless
   deployments are out of scope; pointing the store at Qdrant (Phase G) does
-  not by itself change that. See `plan.md` "Deployment scope".
+  not by itself change that. See the [deployment guide](docs/deployment.md)
+  for WAL, thread ownership, offline model images and index snapshots.
 - **English-only default embedder** (`bge-base-en-v1.5`). Non-English corpora
   need a multilingual model and lose recall on the default.
 - **Corpus ceiling ≈ 200k–500k chunks** on a 32 GB / 8 GB-VRAM laptop.

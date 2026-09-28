@@ -61,6 +61,7 @@ from nanorag.generation.base import Generator
 from nanorag.generation.presets import GROQ, OLLAMA
 from nanorag.hashing import normalize_text
 from nanorag.loaders.directory import DirectoryLoader
+from nanorag.observability.events import EventHook, emit
 from nanorag.observability.timing import Timer
 from nanorag.prompting.templates import INSUFFICIENT_CONTEXT_TEXT, PromptBuilder
 from nanorag.rerank.base import Reranker
@@ -70,6 +71,7 @@ from nanorag.retrieval.dense import DenseRetriever
 from nanorag.store.base import VectorStore
 from nanorag.store.filters import Filter
 from nanorag.store.numpy_store import NumpyVectorStore
+from nanorag.store.snapshot import load_snapshot, save_snapshot
 from nanorag.store.sqlite_docs import SqliteDocumentStore
 from nanorag.tokens import TiktokenCounter
 from nanorag.types import (
@@ -237,9 +239,8 @@ def rerank_hits(
         return reranker.rerank(query, hits, top_n)
     except RerankError:
         log.warning(
-            "reranker %r failed, falling back to retriever order",
-            reranker,
-            exc_info=True,
+            "reranker failed (%s); falling back to retriever order",
+            type(reranker).__name__,
         )
         return hits[:top_n]
 
@@ -437,6 +438,16 @@ class Rag:
         Cosine similarity at or above which :meth:`ingest` flags two
         chunks in the same :data:`DEDUP_GROUP_KEY` group as near-duplicates
         (plan.md §18 F13). Defaults to :data:`DEFAULT_DUPLICATE_THRESHOLD`.
+    event_hook
+        Optional callback for content-free ingest and query completion events.
+        A failing hook is logged and does not interrupt the operation.
+    token_prices
+        ``(provider, model)`` to input/output USD per million tokens. No
+        rate means ``cost_usd=0`` (unpriced); rates are never fetched.
+    snapshot_path
+        Optional ``.npy`` cold-start snapshot of the default NumPy store.
+        A missing or stale snapshot rebuilds from SQLite. Call
+        :meth:`save_snapshot` after writes to refresh it.
 
     Raises
     ------
@@ -465,6 +476,9 @@ class Rag:
         min_gap: float = 0.0,
         min_score: float | None = None,
         duplicate_threshold: float = DEFAULT_DUPLICATE_THRESHOLD,
+        event_hook: EventHook | None = None,
+        token_prices: dict[tuple[str, str], tuple[float, float]] | None = None,
+        snapshot_path: str | Path | None = None,
     ) -> None:
         """Wire the components together (see the class docstring)."""
         meta = docs.index_meta()
@@ -479,9 +493,12 @@ class Rag:
         self.embedder = embedder
         self.generator = generator
         self.docs = docs
+        if vectors is None and snapshot_path is not None:
+            vectors = load_snapshot(docs, embedder.dim, snapshot_path)
         self.vectors = (
             vectors if vectors is not None else load_vectors(docs, embedder.dim)
         )
+        self.snapshot_path = snapshot_path
         self.chunker: Chunker = chunker if chunker is not None else RecursiveChunker()
         self.loader = loader if loader is not None else DirectoryLoader()
         self.prompt_builder = (
@@ -505,6 +522,13 @@ class Rag:
         self.min_gap = min_gap
         self.min_score = min_score
         self.duplicate_threshold = duplicate_threshold
+        self.event_hook = event_hook
+        self.token_prices = token_prices or {}
+        for input_rate, output_rate in self.token_prices.values():
+            if not all(
+                np.isfinite(rate) and rate >= 0 for rate in (input_rate, output_rate)
+            ):
+                raise ConfigError("token prices must be finite and non-negative")
 
     @classmethod
     def from_defaults(
@@ -626,6 +650,7 @@ class Rag:
             if chunks and vectors is not None:
                 self.vectors.upsert(ids, vectors)
             total += len(chunks)
+        emit(self.event_hook, "ingest_complete", chunks=total)
         return total
 
     def _tag_near_duplicates(
@@ -702,6 +727,12 @@ class Rag:
         chunks from search; this only reclaims their space (plan.md §6).
         """
         self.vectors.compact()
+
+    def save_snapshot(self) -> None:
+        """Save the current SQLite embeddings as an optional cold-start index."""
+        if self.snapshot_path is None:
+            raise ConfigError("snapshot_path is required to save a snapshot")
+        save_snapshot(self.docs, self.snapshot_path)
 
     def sync_path(
         self,
@@ -877,7 +908,7 @@ class Rag:
             )
 
         if not context.blocks:
-            return Answer(
+            answer = Answer(
                 text=INSUFFICIENT_CONTEXT_TEXT,
                 citations=(),
                 contexts=(),
@@ -886,28 +917,65 @@ class Rag:
                 usage=Usage(NO_PROVIDER, "", 0, 0, 0),
                 timings=timer.timings(),
             )
+            emit(
+                self.event_hook,
+                "query_complete",
+                prompt_tokens=0,
+                completion_tokens=0,
+                cost_usd=0.0,
+                abstained=True,
+            )
+            return answer
 
         prompt = self.prompt_builder.build(question, context)
         with timer.stage("generate"):
             generation = self.generator.generate(prompt)
+        estimated_prompt = self.counter.count(prompt.as_text())
         _reconcile_usage(
-            self.counter.count(prompt.as_text()),
-            generation.usage.prompt_tokens,
-            self.budget_margin,
+            estimated_prompt, generation.usage.prompt_tokens, self.budget_margin
         )
         report = parse_citations(
             generation.text, context, get_document=self.docs.get_document
         )
         _log_citation_issues(report)
-        return Answer(
+        usage = generation.usage
+        prompt_tokens = usage.prompt_tokens or estimated_prompt
+        completion_tokens = usage.completion_tokens or self.counter.count(
+            generation.text
+        )
+        usage = replace(
+            usage,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=usage.total_tokens or prompt_tokens + completion_tokens,
+        )
+        rates = self.token_prices.get((usage.provider, usage.model))
+        if rates is not None:
+            usage = replace(
+                usage,
+                cost_usd=(
+                    usage.prompt_tokens * rates[0] + usage.completion_tokens * rates[1]
+                )
+                / 1_000_000,
+            )
+        answer = Answer(
             text=generation.text,
             citations=report.citations,
             contexts=context.hits,
             insufficient_context=thin,
             truncated=context.truncated,
-            usage=generation.usage,
+            usage=usage,
             timings=timer.timings(),
         )
+        emit(
+            self.event_hook,
+            "query_complete",
+            prompt_tokens=usage.prompt_tokens,
+            completion_tokens=usage.completion_tokens,
+            cost_usd=usage.cost_usd,
+            abstained=thin,
+        )
+        return answer
 
 
 def _reconcile_usage(estimated: int, reported: int, margin: float) -> None:

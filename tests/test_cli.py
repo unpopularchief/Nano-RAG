@@ -274,7 +274,11 @@ def test_query_json_keeps_non_ascii_and_stdout_holds_only_json(
     out, err = capsys.readouterr()
     payload = json.loads(out)  # nothing but the JSON object on stdout
     assert "\u202f" in payload["answer"]["text"] and "\\u202f" not in out
-    assert "nanorag.cli: index idx: 3 documents; k=8" in err  # -v: INFO on stderr
+    assert any(
+        record.get("logger") == "nanorag.cli"
+        and record.get("message") == "index idx: 3 documents; k=8"
+        for record in (json.loads(line) for line in err.splitlines())
+    )  # -v: INFO JSON on stderr
 
 
 def test_query_usage_errors(corpus, fake_generator, capsys):

@@ -15,7 +15,7 @@ contiguous release list.
 | **E — Durability** | `v0.4.0` | Re-ingesting a changed corpus is correct and cheap. | **done — `v0.4.0`, Gate E passed** |
 | **F — Quality** | `v0.6.0` | Beat the Phase D baseline with evidence — reranking, BM25/hybrid, MMR. Negative results published. | **done — `v0.6.0`, Gate F passed** |
 | **G — Reach** | `v0.7.0` | PDF/HTML loaders, external stores (Qdrant, pgvector), hosted embeddings — without touching the core. | **done — `v0.7.0`, Gate G passed** |
-| **H — Production** | `v1.0.0` | Structured logging, cost accounting, deployment guide, threat model, API freeze. | not started |
+| **H — Production** | `v1.0.0` | Structured logging, cost accounting, deployment guide, threat model, API freeze. | H1 done; H2 next |
 
 ## Phase A sessions
 
@@ -537,6 +537,15 @@ contiguous release list.
   embeddings remain the documented defaults. This gate establishes store
   behaviour parity; Qdrant ANN recall has no measured baseline yet and is
   outside the exact-store Phase D/F quality thresholds.
+
+## Phase H sessions
+
+- **H1** ✅ — JSON logging with credential redaction, content-free ingest/query
+  events, explicit per-model token pricing, WAL for file-backed SQLite, an
+  optional revision-checked NumPy snapshot, and `docs/deployment.md`.
+  Checkpoint: captured log output contains no test credential or prompt text.
+- **H2** — injection scanner, `SECURITY.md`, threat model, known limits, API
+  freeze and Gate H review.
 
 ## Out of scope through 1.0
 

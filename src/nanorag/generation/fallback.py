@@ -78,10 +78,9 @@ class FallbackGenerator:
                 if index + 1 < len(self.generators):
                     nxt = self.generators[index + 1]
                     log.warning(
-                        "%s failed (%s: %s); falling back to %s",
+                        "%s failed (%s); falling back to %s",
                         generator.provider,
                         type(exc).__name__,
-                        exc.message,
                         nxt.provider,
                     )
         assert last is not None  # the loop ran at least once

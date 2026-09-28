@@ -191,9 +191,11 @@ def _settings(args: argparse.Namespace) -> Settings:
 def _configure_logging(verbose: int, default_level: str) -> None:
     """Send the ``nanorag`` logger to stderr at the requested level."""
     level = {0: default_level, 1: "INFO"}.get(verbose, "DEBUG")
-    logging.basicConfig(
-        stream=sys.stderr, level=level, format="%(name)s: %(message)s", force=True
-    )
+    from nanorag.observability.logging import JsonFormatter
+
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setFormatter(JsonFormatter())
+    logging.basicConfig(level=level, handlers=[handler], force=True)
 
 
 def _utf8_stdout() -> None:

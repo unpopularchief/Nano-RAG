@@ -243,9 +243,8 @@ class MultiQueryRetriever:
             extra = self._transform.transform(query)
         except QueryTransformError:
             log.warning(
-                "query transform %r failed, retrieving with the original query only",
-                self._transform,
-                exc_info=True,
+                "query transform failed (%s), retrieving with the original query only",
+                type(self._transform).__name__,
             )
             extra = []
 

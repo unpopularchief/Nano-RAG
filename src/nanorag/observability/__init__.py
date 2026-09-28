@@ -1,5 +1,7 @@
-"""Observability: per-stage timing now; events, logging and redaction in Phase H."""
+"""Timing and content-free structured lifecycle events."""
 
+from nanorag.observability.events import Event, EventHook
+from nanorag.observability.logging import JsonFormatter, redact
 from nanorag.observability.timing import STAGES, Timer
 
-__all__ = ["STAGES", "Timer"]
+__all__ = ["Event", "EventHook", "JsonFormatter", "redact", "STAGES", "Timer"]

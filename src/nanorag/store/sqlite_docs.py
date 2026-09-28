@@ -73,6 +73,17 @@ CREATE TABLE IF NOT EXISTS meta (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+
+INSERT OR IGNORE INTO meta (key, value) VALUES ('embedding_revision', '0');
+CREATE TRIGGER IF NOT EXISTS embeddings_revision_ai AFTER INSERT ON embeddings BEGIN
+    UPDATE meta SET value = CAST(value AS INTEGER) + 1 WHERE key = 'embedding_revision';
+END;
+CREATE TRIGGER IF NOT EXISTS embeddings_revision_au AFTER UPDATE ON embeddings BEGIN
+    UPDATE meta SET value = CAST(value AS INTEGER) + 1 WHERE key = 'embedding_revision';
+END;
+CREATE TRIGGER IF NOT EXISTS embeddings_revision_ad AFTER DELETE ON embeddings BEGIN
+    UPDATE meta SET value = CAST(value AS INTEGER) + 1 WHERE key = 'embedding_revision';
+END;
 """
 
 _FTS_SCHEMA = """
@@ -150,6 +161,8 @@ class SqliteDocumentStore:
         """Open (creating if needed) the database at *path* and its schema."""
         self._path = Path(path)
         self._conn = sqlite3.connect(str(self._path))
+        if str(self._path) != ":memory:":
+            self._conn.execute("PRAGMA journal_mode = WAL")
         self._conn.execute("PRAGMA foreign_keys = ON")
         self._conn.execute("PRAGMA recursive_triggers = ON")
         self._conn.executescript(_SCHEMA)
@@ -193,6 +206,13 @@ class SqliteDocumentStore:
     def close(self) -> None:
         """Close the underlying SQLite connection."""
         self._conn.close()
+
+    def embedding_revision(self) -> int:
+        """Return the durable revision used to validate an index snapshot."""
+        row = self._conn.execute(
+            "SELECT value FROM meta WHERE key = 'embedding_revision'"
+        ).fetchone()
+        return int(row[0])
 
     def __enter__(self) -> SqliteDocumentStore:
         """Return self, for use as a context manager."""

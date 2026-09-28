@@ -7,6 +7,13 @@ breaking changes bump the minor).
 
 ## [Unreleased]
 
+### Added
+
+- **Phase H, session H1:** content-free structured lifecycle events and JSON
+  log formatting with credential redaction; optional per-model token prices
+  for `Answer.usage.cost_usd`; a revision-checked `.npy` index snapshot for
+  faster cold starts; and a single-process deployment guide.
+
 ## [0.7.0] — 2026-09-28
 
 Phase G: optional PDF/HTML input, interchangeable external vector stores,
