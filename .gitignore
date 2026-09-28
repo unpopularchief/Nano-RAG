@@ -19,6 +19,7 @@ coverage.xml
 .mypy_cache/
 .ruff_cache/
 .uv-cache/
+.hypothesis/
 
 # Nano RAG runtime artefacts — never committed
 .nanorag/

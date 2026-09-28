@@ -7,6 +7,29 @@ breaking changes bump the minor).
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-09-28
+
+Phase G: optional PDF/HTML input, interchangeable external vector stores,
+and hosted embedding clients. The local embedder and text/Markdown loaders
+remain the defaults.
+
+### Gate G — review against plan.md §9's Phase G block
+
+- The shared store conformance suite passed on all three backends with live
+  Qdrant and Postgres/pgvector services: 63 passed, 0 skipped in the
+  [integration workflow](https://github.com/unpopularchief/Nano-RAG/actions/runs/36449968364).
+  This establishes behaviour parity, not ANN recall parity. Qdrant recall
+  needs its own measured baseline before any quality claim is made for it;
+  the Phase D/F thresholds remain exact-store only.
+- PDF and HTML fixture extraction, exact chunk offsets into extracted text,
+  missing-extra errors, and per-file failure handling are covered by the
+  default suite. Hosted embedders use MockTransport tests for request shape,
+  provider task types, ordering, errors and key handling; no live provider
+  keys are required.
+- `Rag.from_defaults()` still uses local ONNX embeddings. External stores and
+  hosted embedding clients require explicit construction; `.txt` and `.md`
+  continue to work without parser extras.
+
 ### Added
 
 - **Phase G, session G3 — hosted embedding clients.**

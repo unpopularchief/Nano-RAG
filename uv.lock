@@ -1087,7 +1087,7 @@ wheels = [
 
 [[package]]
 name = "nanorag"
-version = "0.6.0"
+version = "0.7.0"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
@@ -1140,7 +1140,7 @@ requires-dist = [
     { name = "selectolax", marker = "extra == 'html'" },
     { name = "tiktoken", specifier = ">=0.7" },
 ]
-provides-extras = ["local", "pdf", "html", "dev", "qdrant", "pgvector"]
+provides-extras = ["local", "pdf", "html", "qdrant", "pgvector", "dev"]
 
 [[package]]
 name = "nodeenv"

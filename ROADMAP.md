@@ -14,7 +14,7 @@ contiguous release list.
 | **D — Trust** | `v0.3.0` | Citations resolving to text spans, a CLI, quality as numbers in CI (≥ 200-item eval set). | **done — `v0.3.0`, Gate D passed** |
 | **E — Durability** | `v0.4.0` | Re-ingesting a changed corpus is correct and cheap. | **done — `v0.4.0`, Gate E passed** |
 | **F — Quality** | `v0.6.0` | Beat the Phase D baseline with evidence — reranking, BM25/hybrid, MMR. Negative results published. | **done — `v0.6.0`, Gate F passed** |
-| **G — Reach** | `v0.7.0` | PDF/HTML loaders, external stores (Qdrant, pgvector), hosted embeddings — without touching the core. | **G1, G2, G3 done — Gate G next** |
+| **G — Reach** | `v0.7.0` | PDF/HTML loaders, external stores (Qdrant, pgvector), hosted embeddings — without touching the core. | **done — `v0.7.0`, Gate G passed** |
 | **H — Production** | `v1.0.0` | Structured logging, cost accounting, deployment guide, threat model, API freeze. | not started |
 
 ## Phase A sessions
@@ -529,6 +529,14 @@ contiguous release list.
   tests cover request shapes, task types, ordering, normalization, errors,
   empty batches and key handling. Hosted embedding is opt-in; local ONNX stays
   the default.
+
+- **🚦 Gate G** ✅ — the shared conformance suite passed all 63 cases against
+  NumPy, live Qdrant and live Postgres/pgvector in the integration workflow
+  for G3 (run 36449968364). The G1 fixture and G3 MockTransport tests run in
+  the default CI matrix (run 36449968375). Text/Markdown ingestion and local
+  embeddings remain the documented defaults. This gate establishes store
+  behaviour parity; Qdrant ANN recall has no measured baseline yet and is
+  outside the exact-store Phase D/F quality thresholds.
 
 ## Out of scope through 1.0
 

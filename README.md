@@ -4,7 +4,8 @@ A small, readable, production-capable retrieval-augmented generation **engine**
 — not a framework. The goal is that you can read the whole thing in an
 afternoon, run it against your own documents, and operate it for free.
 
-> **Status: `v0.6.0` — Phase G has begun: G1 is done; G2/G3 and Gate G remain.
+> **Status: `v0.7.0` — Gate G has closed: optional PDF/HTML loaders, external
+> vector stores and hosted embeddings are available.
 > Gates D, E and F are closed: citations resolve to text spans, there's a command
 > line, quality is a number enforced in CI, re-ingesting a changed corpus
 > is correct and cheap, and reranking / hybrid retrieval / MMR / parent
@@ -87,7 +88,14 @@ afternoon, run it against your own documents, and operate it for free.
 > keep their dependency lazy and both preserve exact offsets into the
 > extracted `Document.text`; `strip_boilerplate()` removes only explicit
 > whole lines or page-edge lines repeated across PDF pages. See
-> [Optional document formats](#optional-document-formats). See
+> [Optional document formats](#optional-document-formats). **G2 adds Qdrant
+> and Postgres/pgvector stores** behind the same `VectorStore` protocol;
+> their shared conformance suite passed against live services. **G3 adds
+> hosted Gemini, Jina and OpenAI-compatible embedders**. Both additions are
+> opt-in; local ONNX and text/Markdown input remain the defaults. Qdrant ANN
+> recall requires a separate measurement before comparing it with the exact
+> store quality thresholds. See [External vector stores](#external-vector-stores)
+> and [Hosted embeddings](#hosted-embeddings). See
 > [`ROADMAP.md`](ROADMAP.md) for the phased
 > roadmap (condensed from `plan.md`, the project's internal design doc —
 > not part of this repo).
