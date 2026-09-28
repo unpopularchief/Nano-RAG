@@ -208,6 +208,26 @@ needs Docker services) checks behaviour parity across all three backends,
 not recall parity. See `docs/conventions.md` "External stores" for the
 Qdrant point-id mapping and other design notes.
 
+## Hosted embeddings
+
+Local ONNX embeddings remain the default. `GeminiEmbedder`, `JinaEmbedder`
+and `OpenAICompatEmbedder` implement the same `Embedder` protocol; pass one
+to `Rag` in place of the local embedder. Their `model_id` includes the
+provider/model and output width, so the index rejects vectors made by a
+different embedding configuration.
+
+```python
+from nanorag.embeddings import JinaEmbedder
+
+embedder = JinaEmbedder()  # reads JINA_API_KEY
+rag = Rag(embedder=embedder, generator=generator, docs=docs)
+```
+
+Hosted clients send document and query text to the provider. Gemini and Jina
+use retrieval-specific query/document task types; OpenAI-compatible endpoints
+use the shared `/embeddings` request format. See `docs/providers.md` for key
+names and examples.
+
 ## Command line
 
 The same two paths as a command — `nanorag`, installed with the package:

@@ -9,6 +9,15 @@ breaking changes bump the minor).
 
 ### Added
 
+- **Phase G, session G3 — hosted embedding clients.**
+  `nanorag.embeddings.GeminiEmbedder`, `JinaEmbedder` and
+  `OpenAICompatEmbedder` implement the existing `Embedder` protocol, use
+  provider-specific retrieval tasks where available, share typed HTTP errors
+  and retry handling, and return normalized `float32` vectors. Their
+  `model_id` records provider/endpoint, model and dimension so the existing
+  `IndexModelMismatch` guard prevents mixing vectors. Local ONNX remains the
+  documented default; hosted calls require no additional package beyond core
+  `httpx`.
 - **Phase G, session G2 — store conformance suite and external vector
   stores.** `nanorag.store.base.VectorStore`: a `Protocol` (dim, upsert,
   delete, search, get_vectors, compact) written now that there are three

@@ -1,10 +1,9 @@
 # Providers
 
-The two halves of a RAG pipeline have opposite cost profiles, so they get
-opposite answers. Embeddings are called once per chunk and open models are at
-parity with closed ones — so they run **locally**. Generation is called once
-per query and the quality gap is large — so it uses **free-tier APIs**, with a
-local fallback.
+The two halves of a RAG pipeline have opposite cost profiles. Local
+embeddings are the default because they keep ingest free, private and offline;
+hosted embeddings are opt-in for callers who prefer a managed model.
+Generation uses free-tier APIs by default, with a local fallback.
 
 ## Embeddings — local ONNX, no torch
 
@@ -30,6 +29,29 @@ Model files are checksummed against committed expected hashes on first
 download before the cache is trusted. A model swap is a deliberate, visible
 change to those hashes.
 
+## Hosted embeddings — opt in
+
+The local embedder remains the default. `nanorag.embeddings` also exposes
+`GeminiEmbedder`, `JinaEmbedder` and `OpenAICompatEmbedder`, all implementing
+the same `Embedder` protocol. Install no extra: `httpx` is already a core
+dependency. These clients send input text to the provider, use bounded
+timeouts and retry only rate-limit and transient failures. They return
+L2-normalized `float32` vectors like the local implementation.
+
+| Client | Default model | Key | Retrieval behavior |
+| --- | --- | --- | --- |
+| `GeminiEmbedder` | `gemini-embedding-2` (768 dimensions) | `GEMINI_API_KEY` | `RETRIEVAL_DOCUMENT` / `RETRIEVAL_QUERY` |
+| `JinaEmbedder` | `jina-embeddings-v3` (1024 dimensions) | `JINA_API_KEY` | `retrieval.passage` / `retrieval.query` |
+| `OpenAICompatEmbedder` | `text-embedding-3-small` (1536 dimensions) | `OPENAI_API_KEY` | OpenAI-compatible `/embeddings`; configurable URL, model and key variable |
+
+Each embedder's `model_id` includes its provider or endpoint, model and output
+dimension. Reopening an index with a different `model_id` or dimension raises
+`IndexModelMismatch`; changing embedding configuration requires rebuilding
+the vectors. API keys can also be passed explicitly to constructors, and are
+never included in `repr()` or provider errors. These hosted clients are
+opt-in; document text leaves the machine when they are used. Consult each
+provider's current terms before sending private or regulated material.
+
 ## Generation — free-tier APIs, Ollama offline
 
 One `openai_compat.py` client, parameterised by `base_url` + `model` +
@@ -48,8 +70,11 @@ token budget is read from the generator, never hard-coded.
 
 ## Keys
 
-Environment variables only: `GROQ_API_KEY`, `GEMINI_API_KEY`, `JINA_API_KEY`.
-Never written to disk, never logged, never in `repr()` or exception text.
+By default, keys are read from `GROQ_API_KEY`, `GEMINI_API_KEY`,
+`JINA_API_KEY` or `OPENAI_API_KEY` (or a caller-selected variable for an
+OpenAI-compatible API). Constructors also accept an explicit `api_key`.
+Keys are never written to disk, logged, or included in `repr()` or exception
+text.
 The CLI reads a `.env` in the working directory (`docs/cli.md`) — a
 few-line optional read, not a dependency.
 CI never holds a key — the default suite is fully offline against fakes.

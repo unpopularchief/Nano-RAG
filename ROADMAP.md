@@ -14,7 +14,7 @@ contiguous release list.
 | **D — Trust** | `v0.3.0` | Citations resolving to text spans, a CLI, quality as numbers in CI (≥ 200-item eval set). | **done — `v0.3.0`, Gate D passed** |
 | **E — Durability** | `v0.4.0` | Re-ingesting a changed corpus is correct and cheap. | **done — `v0.4.0`, Gate E passed** |
 | **F — Quality** | `v0.6.0` | Beat the Phase D baseline with evidence — reranking, BM25/hybrid, MMR. Negative results published. | **done — `v0.6.0`, Gate F passed** |
-| **G — Reach** | `v0.7.0` | PDF/HTML loaders, external stores (Qdrant, pgvector), hosted embeddings — without touching the core. | **G1, G2 done — G3 next** |
+| **G — Reach** | `v0.7.0` | PDF/HTML loaders, external stores (Qdrant, pgvector), hosted embeddings — without touching the core. | **G1, G2, G3 done — Gate G next** |
 | **H — Production** | `v1.0.0` | Structured logging, cost accounting, deployment guide, threat model, API freeze. | not started |
 
 ## Phase A sessions
@@ -517,6 +517,18 @@ contiguous release list.
   at the pure-logic level (DSN parsing, vector-literal round-trip) since
   no local Postgres was reachable either — its live behaviour is
   unverified until `integration.yml`'s first CI run.
+
+- **G3** ✅ — `embeddings/api.py` provides `GeminiEmbedder`, `JinaEmbedder`
+  and `OpenAICompatEmbedder`, all behind the existing `Embedder` protocol.
+  Gemini and Jina distinguish retrieval queries from corpus documents; the
+  OpenAI-compatible client accepts a custom API root, model and key environment
+  variable. All three return normalized float32 vectors, map HTTP failures to
+  typed provider errors and retry only rate-limit/transient failures.
+  `model_id` includes provider or endpoint, model and dimension, so the
+  existing index check rejects mixed embedding configurations. MockTransport
+  tests cover request shapes, task types, ordering, normalization, errors,
+  empty batches and key handling. Hosted embedding is opt-in; local ONNX stays
+  the default.
 
 ## Out of scope through 1.0
 

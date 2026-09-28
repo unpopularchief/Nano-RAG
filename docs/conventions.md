@@ -74,8 +74,12 @@ kept, tagged with the winner's id, never dropped).
 
 ## Providers
 
-- Two generation files (`openai_compat.py`, `gemini.py`) cover five-plus
-  services. A provider is a ~150-line HTTP client behind a `Protocol`.
+- Generation has two clients (`openai_compat.py`, `gemini.py`); hosted
+  embeddings have three (`embeddings/api.py`) for Gemini, Jina and
+  OpenAI-compatible endpoints. All embedder clients implement the existing
+  `Embedder` protocol and share HTTP handling, typed errors, retries and
+  L2-normalization. Query/document task types are provider-specific where
+  supported.
 - Core logic never imports a provider. Provider/embedder classes are reached
   through `nanorag.generation` / `nanorag.embeddings`, never the top level, so
   `import nanorag` never pulls `httpx`, `fastembed` or `onnxruntime`. `Rag`
@@ -88,6 +92,9 @@ kept, tagged with the winner's id, never dropped).
   `RateLimitError` and `TransientError`; never a 4xx.
 - The key is held privately and never appears in `repr()`, a log line or an
   exception. `__repr__` shows provider and model only.
+- An embedder's `model_id` includes provider/endpoint, model and dimension.
+  The index's existing `IndexModelMismatch` check therefore rejects mixed
+  hosted/local vectors and dimension changes.
 
 ## Facade
 
